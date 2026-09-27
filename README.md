@@ -111,6 +111,17 @@ python3 main.py examples/fibonacci.langc
 python3 main.py --disasm examples/fibonacci.lang
 ```
 
+### Transpiling to C Source Code
+```bash
+python3 main.py --emit-c examples/fibonacci.lang -o fibonacci.c
+```
+
+### Building Standalone Native Executables
+```bash
+python3 main.py --build examples/fibonacci.lang -o fibonacci
+./fibonacci
+```
+
 ### Interactive Step-Debugger
 ```bash
 python3 main.py --debug examples/debugger_demo.lang
@@ -312,6 +323,23 @@ Available debugger commands:
 - `list`, `l`: View source code context with pointer to current line
 - `quit`, `q`: Cleanly abort execution and exit debugger
 - `help`, `h`: Show help guide
+
+---
+
+## Native C Transpilation Backend
+
+The compiler includes an ahead-of-time (AOT) C transpiler backend (`src/c_transpiler.py`) paired with a runtime header (`src/runtime.h`). It translates AST nodes into standard C99 source code and uses `gcc` or `clang` to produce native binary executables.
+
+Features:
+- Dynamic `Value` tagged union representation for numbers, booleans, strings, lists, dictionaries, classes, and instances.
+- Standalone C emission with zero external dependencies beyond the standard C library.
+- Compatible with all core language features: recursion, closures, collections, OOP, and standard library built-ins.
+
+Example:
+```bash
+python3 main.py --build examples/native_demo.lang -o native_demo
+./native_demo
+```
 
 ---
 
