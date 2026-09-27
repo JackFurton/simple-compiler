@@ -12,9 +12,10 @@ It compiles a procedural scripting language down to compact bytecode instruction
 - **Recursive Descent Parser**: Robust precedence parsing emitting rich AST structures with support for expressions, statements, blocks (`{ ... }`), loops (`while`, `for`), conditionals (`if`/`else`), function definitions, and collections (lists and dictionaries).
 - **Compile-Time Optimization**: AST-level constant folding for arithmetic, string concatenations, and boolean logic, plus dead-code elimination for unreachable branches and loops.
 - **Bytecode Compiler**: Translates AST nodes into bytecode chunks with local variable slot resolution, jump patching for control flow, and nested function compilation.
+- **Lexical Closures & Upvalues**: First-class closures using Lua/Crafting Interpreters upvalues (`OP_CLOSURE`, `OP_GET_UPVALUE`, `OP_SET_UPVALUE`, `OP_CLOSE_UPVALUE`), supporting mutable captured state, multiple closures sharing identical upvalues, and arbitrary lexical nesting.
 - **Bytecode Serialization (.langc)**: Compiles source files into standalone `.langc` bytecode binaries with magic header validation for fast execution without re-parsing.
 - **Stack-based Virtual Machine**: Fast execution loop with `CallFrame` stack management, recursion depth protection, operand stack balancing, and descriptive stack traces on runtime errors.
-- **Disassembler**: Human-readable disassembly showing bytecode offsets, opcodes, constant pool references, and jump targets.
+- **Disassembler**: Human-readable disassembly showing bytecode offsets, opcodes, constant pool references, closure upvalues, and jump targets.
 - **Standard Library / Built-ins**: Native functions like `clock()`, `len()`, `str()`, `int()`, `float()`, `type()`, `append()`, `pop()`, `keys()`, and `values()`.
 - **Interactive REPL & CLI**: Real-time evaluation preserving state, with inspection flags (`--disasm`, `--ast`, `--tokens`, `--analyze`, `-c`/`--compile`).
 
@@ -60,7 +61,8 @@ simple-compiler/
 │   ├── fibonacci.lang        # Recursion and conditional branching
 │   ├── functions_and_scopes.lang # Helper functions and native builtins
 │   ├── collections_and_builtins.lang # Lists, dicts, indexing, and methods
-│   └── stdlib_demo.lang      # Math, string utils, and file I/O demo
+│   ├── stdlib_demo.lang      # Math, string utils, and file I/O demo
+│   └── closures_demo.lang    # Lexical closures and shared upvalues demo
 ├── tests/
 │   ├── test_lexer.py         # Scanner unit tests
 │   ├── test_parser.py        # Parser & precedence unit tests
@@ -70,6 +72,7 @@ simple-compiler/
 │   ├── test_optimizer.py     # Constant folding and DCE unit tests
 │   ├── test_serializer.py    # Bytecode file serialization tests
 │   ├── test_stdlib.py        # Standard library unit tests
+│   ├── test_closures.py      # Lexical closures and upvalues unit tests
 │   ├── test_basic.py         # Backward compatibility test suite
 │   └── run_tests.py          # Unified test runner
 └── main.py                   # CLI entrypoint and interactive REPL
@@ -181,7 +184,40 @@ fn fib(n) {
 print fib(10); // Outputs: 55
 ```
 
-### 6. Standard Library Built-ins
+### 6. Lexical Closures & Upvalues
+```javascript
+// State encapsulation with closures
+fn make_counter(start, step) {
+    let count = start;
+    fn next() {
+        let current = count;
+        count = count + step;
+        return current;
+    }
+    return next;
+}
+
+let counter = make_counter(0, 5);
+print counter(); // 0
+print counter(); // 5
+print counter(); // 10
+
+// Shared mutable state across multiple closures
+fn make_box(val) {
+    let state = val;
+    fn get() { return state; }
+    fn set(v) { state = v; }
+    return [get, set];
+}
+
+let b = make_box(10);
+let getter = b[0];
+let setter = b[1];
+setter(42);
+print getter(); // 42
+```
+
+### 7. Standard Library Built-ins
 ```javascript
 // Math
 print sqrt(144); // 12

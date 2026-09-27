@@ -48,7 +48,51 @@ class Chunk:
 class FunctionObject:
     name: str
     arity: int
+    upvalue_count: int = 0
     chunk: Chunk = field(default_factory=Chunk)
 
     def __repr__(self) -> str:
         return f"<fn {self.name}>" if self.name else "<script>"
+
+
+class ObjUpvalue:
+    def __init__(self, location: Optional[int] = None):
+        self.location: Optional[int] = location  # stack index if open, None if closed
+        self.closed_val: Any = None
+
+    def get(self, stack: List[Any]) -> Any:
+        if self.location is not None:
+            return stack[self.location]
+        return self.closed_val
+
+    def set(self, stack: List[Any], val: Any) -> None:
+        if self.location is not None:
+            stack[self.location] = val
+        else:
+            self.closed_val = val
+
+    def __repr__(self) -> str:
+        if self.location is not None:
+            return f"<open upvalue at stack[{self.location}]>"
+        return f"<closed upvalue: {repr(self.closed_val)}>"
+
+
+@dataclass
+class ClosureObject:
+    function: FunctionObject
+    upvalues: List[ObjUpvalue] = field(default_factory=list)
+
+    @property
+    def name(self) -> str:
+        return self.function.name
+
+    @property
+    def arity(self) -> int:
+        return self.function.arity
+
+    @property
+    def chunk(self) -> Chunk:
+        return self.function.chunk
+
+    def __repr__(self) -> str:
+        return f"<fn {self.function.name}>" if self.function.name else "<script>"

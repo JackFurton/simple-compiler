@@ -40,7 +40,11 @@ class OpCode(IntEnum):
     OP_JUMP_IF_FALSE = auto()  # [offset: 2 bytes] if peek(0) is falsy, ip += offset
     OP_LOOP = auto()           # [offset: 2 bytes] ip -= offset
 
-    # Functions & Calls
+    # Functions, Closures & Calls
+    OP_CLOSURE = auto()        # [const_idx: 2 bytes, followed by pairs of (is_local, index)]
+    OP_GET_UPVALUE = auto()    # [upvalue_idx: 2 bytes]
+    OP_SET_UPVALUE = auto()    # [upvalue_idx: 2 bytes]
+    OP_CLOSE_UPVALUE = auto()  # closes upvalue at top of stack and pops it
     OP_CALL = auto()           # [arg_count: 1 byte]
     OP_RETURN = auto()         # returns from current function
 

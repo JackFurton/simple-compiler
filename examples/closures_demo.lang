@@ -1,0 +1,76 @@
+// Demonstration of Lexical Closures and Upvalues in simple-compiler
+
+print "=== 1. Counter Generator (Capturing Local State) ===";
+
+fn make_counter(start, step) {
+    let count = start;
+    fn next() {
+        let current = count;
+        count = count + step;
+        return current;
+    }
+    return next;
+}
+
+let counter10 = make_counter(10, 5);
+print "counter10 step 1: " + str(counter10());
+print "counter10 step 2: " + str(counter10());
+print "counter10 step 3: " + str(counter10());
+
+let counter100 = make_counter(100, 10);
+print "counter100 step 1: " + str(counter100());
+print "counter10 step 4: " + str(counter10());
+print "counter100 step 2: " + str(counter100());
+
+print "";
+print "=== 2. Shared Upvalues (Bank Account Simulation) ===";
+
+fn create_account(owner, initial_deposit) {
+    let balance = initial_deposit;
+
+    fn deposit(amount) {
+        balance = balance + amount;
+        return owner + " balance after deposit: " + str(balance);
+    }
+
+    fn withdraw(amount) {
+        if (amount > balance) {
+            return "Insufficient funds for " + owner;
+        }
+        balance = balance - amount;
+        return owner + " balance after withdrawal: " + str(balance);
+    }
+
+    fn check_balance() {
+        return owner + " current balance: " + str(balance);
+    }
+
+    return [deposit, withdraw, check_balance];
+}
+
+let alice_acct = create_account("Alice", 250);
+let alice_dep = alice_acct[0];
+let alice_with = alice_acct[1];
+let alice_check = alice_acct[2];
+
+print alice_check();
+print alice_dep(150);
+print alice_with(75);
+print alice_check();
+
+print "";
+print "=== 3. Nested Curried Closures ===";
+
+fn multiply3(a) {
+    fn with_b(b) {
+        fn with_c(c) {
+            return a * b * c;
+        }
+        return with_c;
+    }
+    return with_b;
+}
+
+let mult2 = multiply3(2);
+let mult2_by_3 = mult2(3);
+print "2 * 3 * 7 = " + str(mult2_by_3(7));

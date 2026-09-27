@@ -34,9 +34,16 @@ class FunctionType(Enum):
 
 
 @dataclass
+class CompilerUpvalue:
+    index: int
+    is_local: bool
+
+
+@dataclass
 class Local:
     name: str
     depth: int  # -1 if uninitialized, >= 0 initialized
+    is_captured: bool = False
 
 
 class CompileError(Exception):
@@ -53,6 +60,7 @@ class BytecodeCompiler(ASTVisitor):
         self.enclosing = enclosing
         self.function = FunctionObject(name=name, arity=0)
         self.locals: List[Local] = []
+        self.upvalues: List[CompilerUpvalue] = []
         self.scope_depth: int = 0
 
         # Slot 0 in call frame is reserved for function/closure
@@ -109,7 +117,10 @@ class BytecodeCompiler(ASTVisitor):
         self.scope_depth -= 1
         # Pop locals that went out of scope
         while self.locals and self.locals[-1].depth > self.scope_depth:
-            self.emit_opcode(OpCode.OP_POP, line)
+            if self.locals[-1].is_captured:
+                self.emit_opcode(OpCode.OP_CLOSE_UPVALUE, line)
+            else:
+                self.emit_opcode(OpCode.OP_POP, line)
             self.locals.pop()
 
     def resolve_local(self, name: str, line: int = 1) -> Optional[int]:
@@ -119,6 +130,31 @@ class BytecodeCompiler(ASTVisitor):
                 if local.depth == -1:
                     raise CompileError(f"Cannot read local variable '{name}' in its own initializer", line)
                 return i
+        return None
+
+    def add_upvalue(self, index: int, is_local: bool) -> int:
+        for i, u in enumerate(self.upvalues):
+            if u.index == index and u.is_local == is_local:
+                return i
+        self.upvalues.append(CompilerUpvalue(index, is_local))
+        self.function.upvalue_count = len(self.upvalues)
+        return len(self.upvalues) - 1
+
+    def resolve_upvalue(self, name: str, line: int = 1) -> Optional[int]:
+        if self.enclosing is None:
+            return None
+
+        # 1. Local in immediately enclosing function
+        local = self.enclosing.resolve_local(name, line)
+        if local is not None:
+            self.enclosing.locals[local].is_captured = True
+            return self.add_upvalue(local, is_local=True)
+
+        # 2. Upvalue from an enclosing function
+        upvalue = self.enclosing.resolve_upvalue(name, line)
+        if upvalue is not None:
+            return self.add_upvalue(upvalue, is_local=False)
+
         return None
 
     def add_local(self, name: str, line: int = 1) -> int:
@@ -193,10 +229,17 @@ class BytecodeCompiler(ASTVisitor):
         if slot is not None:
             self.emit_opcode(OpCode.OP_GET_LOCAL, node.line)
             self.emit_u16(slot, node.line)
-        else:
-            const_idx = self.chunk.add_constant(node.name)
-            self.emit_opcode(OpCode.OP_GET_GLOBAL, node.line)
-            self.emit_u16(const_idx, node.line)
+            return
+
+        upvalue = self.resolve_upvalue(node.name, node.line)
+        if upvalue is not None:
+            self.emit_opcode(OpCode.OP_GET_UPVALUE, node.line)
+            self.emit_u16(upvalue, node.line)
+            return
+
+        const_idx = self.chunk.add_constant(node.name)
+        self.emit_opcode(OpCode.OP_GET_GLOBAL, node.line)
+        self.emit_u16(const_idx, node.line)
 
     def visit_AssignmentNode(self, node: AssignmentNode) -> None:
         self.visit(node.value)
@@ -205,10 +248,17 @@ class BytecodeCompiler(ASTVisitor):
         if slot is not None:
             self.emit_opcode(OpCode.OP_SET_LOCAL, node.line)
             self.emit_u16(slot, node.line)
-        else:
-            const_idx = self.chunk.add_constant(node.variable)
-            self.emit_opcode(OpCode.OP_SET_GLOBAL, node.line)
-            self.emit_u16(const_idx, node.line)
+            return
+
+        upvalue = self.resolve_upvalue(node.variable, node.line)
+        if upvalue is not None:
+            self.emit_opcode(OpCode.OP_SET_UPVALUE, node.line)
+            self.emit_u16(upvalue, node.line)
+            return
+
+        const_idx = self.chunk.add_constant(node.variable)
+        self.emit_opcode(OpCode.OP_SET_GLOBAL, node.line)
+        self.emit_u16(const_idx, node.line)
 
     def visit_VarDeclarationNode(self, node: VarDeclarationNode) -> None:
         if not self.is_global_scope():
@@ -330,6 +380,10 @@ class BytecodeCompiler(ASTVisitor):
             raise CompileError(f"Unknown unary operator: {node.operator}", node.line)
 
     def visit_FunctionDefNode(self, node: FunctionDefNode) -> None:
+        if not self.is_global_scope():
+            self.add_local(node.name, node.line)
+            self.mark_initialized()
+
         fn_compiler = BytecodeCompiler(
             fn_type=FunctionType.TYPE_FUNCTION,
             name=node.name,
@@ -348,17 +402,16 @@ class BytecodeCompiler(ASTVisitor):
         fn_compiler.emit_return(node.line)
 
         compiled_fn = fn_compiler.function
+        compiled_fn.upvalue_count = len(fn_compiler.upvalues)
         const_idx = self.chunk.add_constant(compiled_fn)
-        self.emit_opcode(OpCode.OP_CONSTANT, node.line)
+        self.emit_opcode(OpCode.OP_CLOSURE, node.line)
         self.emit_u16(const_idx, node.line)
 
-        if not self.is_global_scope():
-            slot = self.add_local(node.name, node.line)
-            self.mark_initialized()
-            self.emit_opcode(OpCode.OP_SET_LOCAL, node.line)
-            self.emit_u16(slot, node.line)
-            self.emit_opcode(OpCode.OP_POP, node.line)
-        else:
+        for u in fn_compiler.upvalues:
+            self.emit_byte(1 if u.is_local else 0, node.line)
+            self.emit_u16(u.index, node.line)
+
+        if self.is_global_scope():
             name_idx = self.chunk.add_constant(node.name)
             self.emit_opcode(OpCode.OP_DEFINE_GLOBAL, node.line)
             self.emit_u16(name_idx, node.line)
