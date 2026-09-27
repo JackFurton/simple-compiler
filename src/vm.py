@@ -1,14 +1,14 @@
 import time
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Union
 from dataclasses import dataclass
 
 try:
     from .opcodes import OpCode
-    from .chunk import Chunk, FunctionObject
+    from .chunk import Chunk, FunctionObject, ClosureObject, ObjUpvalue
     from .stdlib import get_stdlib_functions, get_stdlib_constants
 except ImportError:
     from opcodes import OpCode
-    from chunk import Chunk, FunctionObject
+    from chunk import Chunk, FunctionObject, ClosureObject, ObjUpvalue
     from stdlib import get_stdlib_functions, get_stdlib_constants
 
 
@@ -24,9 +24,23 @@ class VMError(Exception):
 
 @dataclass
 class CallFrame:
-    function: FunctionObject
+    closure: ClosureObject
     ip: int = 0
     slots: int = 0
+
+    def __init__(self, closure: Optional[ClosureObject] = None, function: Optional[FunctionObject] = None, ip: int = 0, slots: int = 0):
+        if closure is not None:
+            self.closure = closure
+        elif function is not None:
+            self.closure = ClosureObject(function=function)
+        else:
+            raise ValueError("CallFrame requires either closure or function")
+        self.ip = ip
+        self.slots = slots
+
+    @property
+    def function(self) -> FunctionObject:
+        return self.closure.function
 
     def read_byte(self) -> int:
         byte_val = self.function.chunk.code[self.ip]
@@ -50,6 +64,7 @@ class VM:
         self.output_callback = output_callback or print
         self.stack: List[Any] = []
         self.frames: List[CallFrame] = []
+        self.open_upvalues: List[ObjUpvalue] = []
         self.globals: Dict[str, Any] = self._setup_globals()
         self.builtins: Dict[str, Callable] = self._setup_builtins()
 
@@ -86,7 +101,7 @@ class VM:
             return "list"
         if isinstance(val, dict):
             return "dict"
-        if isinstance(val, FunctionObject) or callable(val):
+        if isinstance(val, (FunctionObject, ClosureObject)) or callable(val):
             return "function"
         return type(val).__name__
 
@@ -126,16 +141,37 @@ class VM:
             trace.append(f"[line {line}] in {fn_name}()")
         raise VMError(message, trace)
 
+    def capture_upvalue(self, location: int) -> ObjUpvalue:
+        for upval in self.open_upvalues:
+            if upval.location == location:
+                return upval
+        created = ObjUpvalue(location)
+        self.open_upvalues.append(created)
+        return created
+
+    def close_upvalues(self, last_slot: int) -> None:
+        i = 0
+        while i < len(self.open_upvalues):
+            upval = self.open_upvalues[i]
+            if upval.location is not None and upval.location >= last_slot:
+                upval.closed_val = self.stack[upval.location]
+                upval.location = None
+                self.open_upvalues.pop(i)
+            else:
+                i += 1
+
     def call_value(self, callee: Any, arg_count: int) -> None:
-        if isinstance(callee, FunctionObject):
-            if arg_count != callee.arity:
-                self.runtime_error(f"Function '{callee.name}' expected {callee.arity} arguments but got {arg_count}")
+        if isinstance(callee, (ClosureObject, FunctionObject)):
+            closure = callee if isinstance(callee, ClosureObject) else ClosureObject(function=callee)
+            fn = closure.function
+            if arg_count != fn.arity:
+                self.runtime_error(f"Function '{fn.name}' expected {fn.arity} arguments but got {arg_count}")
 
             if len(self.frames) >= self.MAX_FRAMES:
                 self.runtime_error("Stack overflow: maximum recursion depth exceeded")
 
             slots = len(self.stack) - arg_count - 1
-            new_frame = CallFrame(function=callee, ip=0, slots=slots)
+            new_frame = CallFrame(closure=closure, ip=0, slots=slots)
             self.frames.append(new_frame)
 
         elif callable(callee):
@@ -154,11 +190,16 @@ class VM:
         else:
             self.runtime_error(f"Can only call functions, got {type(callee).__name__}")
 
-    def interpret(self, main_function: FunctionObject) -> Any:
+    def interpret(self, main_function: Union[FunctionObject, ClosureObject]) -> Any:
         self.stack.clear()
         self.frames.clear()
-        self.push(main_function)
-        root_frame = CallFrame(function=main_function, ip=0, slots=0)
+        self.open_upvalues.clear()
+        if isinstance(main_function, ClosureObject):
+            main_closure = main_function
+        else:
+            main_closure = ClosureObject(function=main_function)
+        self.push(main_closure)
+        root_frame = CallFrame(closure=main_closure, ip=0, slots=0)
         self.frames.append(root_frame)
         return self.run()
 
@@ -201,6 +242,20 @@ class VM:
             elif opcode == OpCode.OP_SET_LOCAL:
                 slot = frame.read_u16()
                 self.stack[frame.slots + slot] = self.peek(0)
+
+            elif opcode == OpCode.OP_GET_UPVALUE:
+                slot = frame.read_u16()
+                upval = frame.closure.upvalues[slot]
+                self.push(upval.get(self.stack))
+
+            elif opcode == OpCode.OP_SET_UPVALUE:
+                slot = frame.read_u16()
+                upval = frame.closure.upvalues[slot]
+                upval.set(self.stack, self.peek(0))
+
+            elif opcode == OpCode.OP_CLOSE_UPVALUE:
+                self.close_upvalues(len(self.stack) - 1)
+                self.pop()
 
             elif opcode == OpCode.OP_DEFINE_GLOBAL:
                 name = frame.read_constant()
@@ -313,6 +368,19 @@ class VM:
                 offset = frame.read_u16()
                 frame.ip -= offset
 
+            elif opcode == OpCode.OP_CLOSURE:
+                const_idx = frame.read_u16()
+                fn = frame.function.chunk.constants[const_idx]
+                closure = ClosureObject(function=fn)
+                for _ in range(fn.upvalue_count):
+                    is_local = frame.read_byte()
+                    index = frame.read_u16()
+                    if is_local:
+                        closure.upvalues.append(self.capture_upvalue(frame.slots + index))
+                    else:
+                        closure.upvalues.append(frame.closure.upvalues[index])
+                self.push(closure)
+
             elif opcode == OpCode.OP_CALL:
                 arg_count = frame.read_byte()
                 self.call_value(self.peek(arg_count), arg_count)
@@ -356,6 +424,7 @@ class VM:
 
             elif opcode == OpCode.OP_RETURN:
                 result = self.pop()
+                self.close_upvalues(frame.slots)
                 prev_frame = self.frames.pop()
                 if not self.frames:
                     return result

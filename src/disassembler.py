@@ -46,6 +46,28 @@ def disassemble_instruction(chunk: Chunk, offset: int) -> Tuple[str, int, Option
             nested_fn = (val.name or "<anonymous>", val.chunk)
         return f"{offset:04d} {line_str} {opcode.name:<18} {const_idx:4d} ({val_str})", offset + 3, nested_fn
 
+    elif opcode == OpCode.OP_CLOSURE:
+        const_idx = chunk.read_u16(offset + 1)
+        fn_obj = chunk.constants[const_idx]
+        fn_name = fn_obj.name or "<script>"
+        nested_fn = (fn_name, fn_obj.chunk)
+        res_lines = [f"{offset:04d} {line_str} {opcode.name:<18} {const_idx:4d} (<fn {fn_name}>)"]
+        curr_offset = offset + 3
+        for _ in range(fn_obj.upvalue_count):
+            is_local = chunk.code[curr_offset]
+            idx = chunk.read_u16(curr_offset + 1)
+            curr_offset += 3
+            tag = "local" if is_local else "upvalue"
+            res_lines.append(f"{curr_offset-3:04d}      |                     {tag} {idx}")
+        return "\n".join(res_lines), curr_offset, nested_fn
+
+    elif opcode in (OpCode.OP_GET_UPVALUE, OpCode.OP_SET_UPVALUE):
+        upvalue_idx = chunk.read_u16(offset + 1)
+        return f"{offset:04d} {line_str} {opcode.name:<18} upvalue {upvalue_idx}", offset + 3, None
+
+    elif opcode == OpCode.OP_CLOSE_UPVALUE:
+        return f"{offset:04d} {line_str} {opcode.name}", offset + 1, None
+
     elif opcode in (OpCode.OP_DEFINE_GLOBAL, OpCode.OP_GET_GLOBAL, OpCode.OP_SET_GLOBAL):
         const_idx = chunk.read_u16(offset + 1)
         name = chunk.constants[const_idx]

@@ -42,6 +42,7 @@ def function_to_dict(fn: FunctionObject) -> Dict[str, Any]:
     return {
         "name": fn.name,
         "arity": fn.arity,
+        "upvalue_count": fn.upvalue_count,
         "code": list(fn.chunk.code),
         "lines": fn.chunk.lines,
         "constants": serialized_constants
@@ -49,7 +50,11 @@ def function_to_dict(fn: FunctionObject) -> Dict[str, Any]:
 
 
 def dict_to_function(data: Dict[str, Any]) -> FunctionObject:
-    fn = FunctionObject(name=data["name"], arity=data["arity"])
+    fn = FunctionObject(
+        name=data["name"],
+        arity=data["arity"],
+        upvalue_count=data.get("upvalue_count", 0)
+    )
     chunk = fn.chunk
     chunk.code = bytearray(data["code"])
     chunk.lines = list(data["lines"])
