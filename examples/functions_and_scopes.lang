@@ -1,0 +1,24 @@
+// Demonstrating nested functions, recursion, built-in functions, and string operations
+
+fn is_even(n) {
+    return n % 2 == 0;
+}
+
+fn describe_number(n) {
+    if (is_even(n)) {
+        return str(n) + " is even";
+    } else {
+        return str(n) + " is odd";
+    }
+}
+
+print "--- Testing Functions & Built-ins ---";
+let num = 1;
+while (num <= 6) {
+    print describe_number(num);
+    num = num + 1;
+}
+
+print "";
+print "Current timestamp: " + str(clock());
+print "Length of 'Antigravity': " + str(len("Antigravity"));

@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run test suite
+        run: |
+          python tests/run_tests.py
+
+      - name: Smoke test examples
+        run: |
+          python main.py examples/basic.lang
+          python main.py examples/control_flow.lang
+          python main.py examples/fibonacci.lang
+          python main.py examples/functions_and_scopes.lang
+          python main.py examples/collections_and_builtins.lang
+
+      - name: Test bytecode compilation and .langc execution
+        run: |
+          python main.py -c examples/fibonacci.lang
+          python main.py examples/fibonacci.langc

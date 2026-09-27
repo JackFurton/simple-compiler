@@ -1,0 +1,28 @@
+// Demonstrating lists, dictionaries, indexing, and collection built-ins
+
+let scores = [95, 82, 88];
+print "Initial first score: " + str(scores[0]);
+
+// Index assignment
+scores[1] = 90;
+print "Updated scores: " + str(scores);
+
+// List built-ins
+append(scores, 100);
+print "Length after append: " + str(len(scores));
+
+let popped_val = pop(scores);
+print "Popped value: " + str(popped_val);
+print "Length after pop: " + str(len(scores));
+
+// Dictionaries
+let user = {
+    "username": "krog",
+    "role": "admin",
+    "level": 42
+};
+
+print "Username: " + user["username"];
+user["level"] = 43;
+print "New Level: " + str(user["level"]);
+print "User keys count: " + str(len(keys(user)));

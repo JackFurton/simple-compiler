@@ -1,0 +1,14 @@
+// Fibonacci example demonstrating recursion, conditionals, and functions
+fn fib(n) {
+    if (n <= 1) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+print "Calculating fibonacci numbers:";
+let i = 0;
+while (i <= 10) {
+    print "fib(" + str(i) + ") = " + str(fib(i));
+    i = i + 1;
+}
