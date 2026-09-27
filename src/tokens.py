@@ -36,6 +36,7 @@ class TokenType(Enum):
     COLON = auto()
     COMMA = auto()
     SEMICOLON = auto()
+    DOT = auto()
 
     # Keywords
     PRINT = auto()
@@ -52,6 +53,9 @@ class TokenType(Enum):
     AND = auto()
     OR = auto()
     NOT = auto()
+    CLASS = auto()
+    THIS = auto()
+    SUPER = auto()
 
     # Special
     EOF = auto()

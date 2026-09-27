@@ -50,9 +50,15 @@ class Environment:
 
 
 class UserFunction:
-    def __init__(self, declaration: FunctionDefNode, closure: Environment):
+    def __init__(self, declaration: FunctionDefNode, closure: Environment, is_initializer: bool = False):
         self.declaration = declaration
         self.closure = closure
+        self.is_initializer = is_initializer
+
+    def bind(self, instance: 'InterpreterInstance') -> 'UserFunction':
+        env = Environment(self.closure)
+        env.define("this", instance)
+        return UserFunction(self.declaration, env, self.is_initializer)
 
     def call(self, interpreter: 'Interpreter', arguments: list) -> Any:
         env = Environment(self.closure)
@@ -62,8 +68,56 @@ class UserFunction:
         try:
             interpreter.execute_block(self.declaration.body.statements, env)
         except ReturnException as ret:
+            if self.is_initializer:
+                return self.closure.get("this")
             return ret.value
+        if self.is_initializer:
+            return self.closure.get("this")
         return None
+
+
+class InterpreterClass:
+    def __init__(self, name: str, superclass: Optional['InterpreterClass'], methods: Dict[str, UserFunction]):
+        self.name = name
+        self.superclass = superclass
+        self.methods = methods
+
+    def find_method(self, name: str) -> Optional[UserFunction]:
+        if name in self.methods:
+            return self.methods[name]
+        if self.superclass is not None:
+            return self.superclass.find_method(name)
+        return None
+
+    def call(self, interpreter: 'Interpreter', arguments: list) -> Any:
+        instance = InterpreterInstance(self)
+        init_method = self.find_method("init")
+        if init_method is not None:
+            init_method.bind(instance).call(interpreter, arguments)
+        return instance
+
+    def __repr__(self) -> str:
+        return f"<class {self.name}>"
+
+
+class InterpreterInstance:
+    def __init__(self, klass: InterpreterClass):
+        self.klass = klass
+        self.fields: Dict[str, Any] = {}
+
+    def get(self, name: str) -> Any:
+        if name in self.fields:
+            return self.fields[name]
+        method = self.klass.find_method(name)
+        if method is not None:
+            return method.bind(self)
+        raise RuntimeError(f"Undefined property '{name}' on instance of {self.klass.name}")
+
+    def set(self, name: str, value: Any) -> None:
+        self.fields[name] = value
+
+    def __repr__(self) -> str:
+        return f"<instance of {self.klass.name}>"
 
 
 class Interpreter(ASTVisitor):
@@ -163,12 +217,56 @@ class Interpreter(ASTVisitor):
         callee = self.visit(node.callee)
         arguments = [self.visit(arg) for arg in node.arguments]
 
-        if isinstance(callee, UserFunction):
+        if isinstance(callee, (UserFunction, InterpreterClass)):
             return callee.call(self, arguments)
         elif callable(callee):
             return callee(*arguments)
         else:
             raise RuntimeError(f"Can only call functions, got {type(callee).__name__}")
+
+    def visit_ClassDefNode(self, node: ClassDefNode) -> Any:
+        superclass = None
+        if node.superclass:
+            superclass = self.environment.get(node.superclass)
+            if not isinstance(superclass, InterpreterClass):
+                raise RuntimeError(f"Superclass '{node.superclass}' must be a class")
+
+        methods = {}
+        for method in node.methods:
+            fn = UserFunction(method, self.environment, is_initializer=(method.name == "init"))
+            methods[method.name] = fn
+
+        klass = InterpreterClass(node.name, superclass, methods)
+        self.environment.define(node.name, klass)
+        return klass
+
+    def visit_GetPropertyNode(self, node: GetPropertyNode) -> Any:
+        target = self.visit(node.target)
+        if not isinstance(target, InterpreterInstance):
+            raise RuntimeError(f"Only instances have properties, got {type(target).__name__}")
+        return target.get(node.property_name)
+
+    def visit_SetPropertyNode(self, node: SetPropertyNode) -> Any:
+        target = self.visit(node.target)
+        if not isinstance(target, InterpreterInstance):
+            raise RuntimeError(f"Only instances have fields, got {type(target).__name__}")
+        value = self.visit(node.value)
+        target.set(node.property_name, value)
+        return value
+
+    def visit_ThisNode(self, node: ThisNode) -> Any:
+        return self.environment.get("this")
+
+    def visit_SuperPropertyNode(self, node: SuperPropertyNode) -> Any:
+        receiver = self.environment.get("this")
+        if not isinstance(receiver, InterpreterInstance):
+            raise RuntimeError("Cannot use 'super' outside an instance method")
+        if receiver.klass.superclass is None:
+            raise RuntimeError(f"Class '{receiver.klass.name}' has no superclass")
+        method = receiver.klass.superclass.find_method(node.property_name)
+        if method is None:
+            raise RuntimeError(f"Undefined property '{node.property_name}' in superclass")
+        return method.bind(receiver)
 
     def visit_ReturnNode(self, node: ReturnNode) -> None:
         val = None

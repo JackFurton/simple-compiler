@@ -48,6 +48,14 @@ class OpCode(IntEnum):
     OP_CALL = auto()           # [arg_count: 1 byte]
     OP_RETURN = auto()         # returns from current function
 
+    # Classes & Object-Oriented Programming
+    OP_CLASS = auto()          # [name_idx: 2 bytes] creates ClassObject, pushes to stack
+    OP_METHOD = auto()         # [name_idx: 2 bytes] pops closure, defines method on class
+    OP_GET_PROPERTY = auto()   # [name_idx: 2 bytes] pops instance, pushes field or bound method
+    OP_SET_PROPERTY = auto()   # [name_idx: 2 bytes] pops value and instance, sets field, pushes value
+    OP_INHERIT = auto()        # superclass = pop(), subclass = peek(0), sets inheritance
+    OP_GET_SUPER = auto()      # [name_idx: 2 bytes] looks up superclass method on receiver (this)
+
     # Collections
     OP_BUILD_LIST = auto()     # [count: 2 bytes] pops count values, pushes list
     OP_BUILD_MAP = auto()      # [count: 2 bytes] pops count pairs, pushes dict

@@ -4,11 +4,11 @@ from dataclasses import dataclass
 
 try:
     from .opcodes import OpCode
-    from .chunk import Chunk, FunctionObject, ClosureObject, ObjUpvalue
+    from .chunk import Chunk, FunctionObject, ClosureObject, ObjUpvalue, ClassObject, InstanceObject, BoundMethod
     from .stdlib import get_stdlib_functions, get_stdlib_constants
 except ImportError:
     from opcodes import OpCode
-    from chunk import Chunk, FunctionObject, ClosureObject, ObjUpvalue
+    from chunk import Chunk, FunctionObject, ClosureObject, ObjUpvalue, ClassObject, InstanceObject, BoundMethod
     from stdlib import get_stdlib_functions, get_stdlib_constants
 
 
@@ -101,6 +101,12 @@ class VM:
             return "list"
         if isinstance(val, dict):
             return "dict"
+        if isinstance(val, ClassObject):
+            return "class"
+        if isinstance(val, InstanceObject):
+            return "instance"
+        if isinstance(val, BoundMethod):
+            return "method"
         if isinstance(val, (FunctionObject, ClosureObject)) or callable(val):
             return "function"
         return type(val).__name__
@@ -171,6 +177,40 @@ class VM:
                 self.runtime_error("Stack overflow: maximum recursion depth exceeded")
 
             slots = len(self.stack) - arg_count - 1
+            new_frame = CallFrame(closure=closure, ip=0, slots=slots)
+            self.frames.append(new_frame)
+
+        elif isinstance(callee, ClassObject):
+            instance = InstanceObject(klass=callee)
+            init_method = callee.find_method("init")
+            if init_method is not None:
+                if arg_count != init_method.arity:
+                    self.runtime_error(f"Class '{callee.name}' constructor expected {init_method.arity} arguments but got {arg_count}")
+
+                if len(self.frames) >= self.MAX_FRAMES:
+                    self.runtime_error("Stack overflow: maximum recursion depth exceeded")
+
+                slots = len(self.stack) - arg_count - 1
+                self.stack[slots] = instance
+                new_frame = CallFrame(closure=init_method, ip=0, slots=slots)
+                self.frames.append(new_frame)
+            else:
+                if arg_count != 0:
+                    self.runtime_error(f"Class '{callee.name}' takes no constructor arguments, got {arg_count}")
+                self.pop()  # pop class
+                self.push(instance)
+
+        elif isinstance(callee, BoundMethod):
+            closure = callee.method
+            fn = closure.function
+            if arg_count != fn.arity:
+                self.runtime_error(f"Method '{fn.name}' expected {fn.arity} arguments but got {arg_count}")
+
+            if len(self.frames) >= self.MAX_FRAMES:
+                self.runtime_error("Stack overflow: maximum recursion depth exceeded")
+
+            slots = len(self.stack) - arg_count - 1
+            self.stack[slots] = callee.receiver
             new_frame = CallFrame(closure=closure, ip=0, slots=slots)
             self.frames.append(new_frame)
 
@@ -384,6 +424,64 @@ class VM:
             elif opcode == OpCode.OP_CALL:
                 arg_count = frame.read_byte()
                 self.call_value(self.peek(arg_count), arg_count)
+
+            elif opcode == OpCode.OP_CLASS:
+                name = frame.read_constant()
+                self.push(ClassObject(name=name))
+
+            elif opcode == OpCode.OP_INHERIT:
+                super_val = self.pop()
+                sub_val = self.peek(0)
+                if not isinstance(super_val, ClassObject):
+                    self.runtime_error(f"Superclass must be a class, got {type(super_val).__name__}")
+                if super_val is sub_val:
+                    self.runtime_error("A class cannot inherit from itself")
+                sub_val.superclass = super_val
+
+            elif opcode == OpCode.OP_METHOD:
+                name = frame.read_constant()
+                method_closure = self.pop()
+                klass = self.peek(0)
+                if not isinstance(klass, ClassObject):
+                    self.runtime_error("OP_METHOD called without class on stack")
+                klass.methods[name] = method_closure
+                method_closure.function.klass = klass
+
+            elif opcode == OpCode.OP_GET_PROPERTY:
+                name = frame.read_constant()
+                target = self.pop()
+                if not isinstance(target, InstanceObject):
+                    self.runtime_error(f"Only instances have properties, got {type(target).__name__}")
+                if name in target.fields:
+                    self.push(target.fields[name])
+                else:
+                    method = target.klass.find_method(name)
+                    if method is not None:
+                        self.push(BoundMethod(receiver=target, method=method))
+                    else:
+                        self.runtime_error(f"Undefined property '{name}' on instance of {target.klass.name}")
+
+            elif opcode == OpCode.OP_SET_PROPERTY:
+                name = frame.read_constant()
+                val = self.pop()
+                target = self.pop()
+                if not isinstance(target, InstanceObject):
+                    self.runtime_error(f"Only instances have fields, got {type(target).__name__}")
+                target.set_field(name, val)
+                self.push(val)
+
+            elif opcode == OpCode.OP_GET_SUPER:
+                name = frame.read_constant()
+                receiver = self.pop()
+                if not isinstance(receiver, InstanceObject):
+                    self.runtime_error("Invalid receiver for super call")
+                current_klass = frame.function.klass
+                if current_klass is None or current_klass.superclass is None:
+                    self.runtime_error("Cannot resolve superclass for super call")
+                method = current_klass.superclass.find_method(name)
+                if method is None:
+                    self.runtime_error(f"Undefined property '{name}' in superclass '{current_klass.superclass.name}'")
+                self.push(BoundMethod(receiver=receiver, method=method))
 
             elif opcode == OpCode.OP_BUILD_LIST:
                 count = frame.read_u16()

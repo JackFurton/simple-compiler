@@ -14,6 +14,7 @@ tests = [
     "test_serializer.py",
     "test_stdlib.py",
     "test_closures.py",
+    "test_classes.py",
     "test_basic.py",
 ]
 

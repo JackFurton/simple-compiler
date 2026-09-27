@@ -1,0 +1,74 @@
+// Demonstration of Object-Oriented Programming in simple-compiler
+
+print "=== 1. Classes, Fields, and Methods ===";
+
+class BankAccount {
+    fn init(owner, balance) {
+        this.owner = owner;
+        this.balance = balance;
+    }
+
+    fn deposit(amount) {
+        this.balance = this.balance + amount;
+        return this.owner + " new balance: " + str(this.balance);
+    }
+
+    fn withdraw(amount) {
+        if (amount > this.balance) {
+            return "Insufficient funds for " + this.owner;
+        }
+        this.balance = this.balance - amount;
+        return this.owner + " new balance: " + str(this.balance);
+    }
+
+    fn describe() {
+        return "Account[" + this.owner + ", Balance: " + str(this.balance) + "]";
+    }
+}
+
+let acct = BankAccount("Bob", 500);
+print acct.describe();
+print acct.deposit(200);
+print acct.withdraw(150);
+print acct.describe();
+
+print "";
+print "=== 2. First-Class Bound Methods ===";
+
+// Method references can be passed and called independently
+let deposit_fn = acct.deposit;
+print deposit_fn(50);
+print acct.describe();
+
+print "";
+print "=== 3. Inheritance and Polymorphism ===";
+
+class Animal {
+    fn init(name) {
+        this.name = name;
+    }
+
+    fn speak() {
+        return this.name + " makes a sound.";
+    }
+}
+
+class Dog < Animal {
+    fn speak() {
+        return this.name + " barks: Woof!";
+    }
+}
+
+class GoldenRetriever < Dog {
+    fn speak() {
+        return super.speak() + " (and wags tail)";
+    }
+}
+
+let a = Animal("Creature");
+let d = Dog("Buddy");
+let g = GoldenRetriever("Daisy");
+
+print a.speak();
+print d.speak();
+print g.speak();

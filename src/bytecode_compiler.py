@@ -10,7 +10,8 @@ try:
         VarDeclarationNode, BlockNode, IfNode, WhileNode,
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ASTVisitor,
-        ListNode, DictNode, IndexNode, IndexAssignmentNode
+        ListNode, DictNode, IndexNode, IndexAssignmentNode,
+        ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
     )
     from .opcodes import OpCode
     from .chunk import Chunk, FunctionObject
@@ -22,7 +23,8 @@ except ImportError:
         VarDeclarationNode, BlockNode, IfNode, WhileNode,
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ASTVisitor,
-        ListNode, DictNode, IndexNode, IndexAssignmentNode
+        ListNode, DictNode, IndexNode, IndexAssignmentNode,
+        ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
     )
     from opcodes import OpCode
     from chunk import Chunk, FunctionObject
@@ -31,6 +33,8 @@ except ImportError:
 class FunctionType(Enum):
     TYPE_SCRIPT = auto()
     TYPE_FUNCTION = auto()
+    TYPE_METHOD = auto()
+    TYPE_INITIALIZER = auto()
 
 
 @dataclass
@@ -55,16 +59,24 @@ class CompileError(Exception):
 
 
 class BytecodeCompiler(ASTVisitor):
-    def __init__(self, fn_type: FunctionType = FunctionType.TYPE_SCRIPT, name: str = "", enclosing: Optional['BytecodeCompiler'] = None):
+    def __init__(
+        self,
+        fn_type: FunctionType = FunctionType.TYPE_SCRIPT,
+        name: str = "",
+        enclosing: Optional['BytecodeCompiler'] = None,
+        current_class: Optional[str] = None
+    ):
         self.type = fn_type
         self.enclosing = enclosing
+        self.current_class = current_class or (enclosing.current_class if enclosing else None)
         self.function = FunctionObject(name=name, arity=0)
         self.locals: List[Local] = []
         self.upvalues: List[CompilerUpvalue] = []
         self.scope_depth: int = 0
 
-        # Slot 0 in call frame is reserved for function/closure
-        self.locals.append(Local(name="", depth=0))
+        # Slot 0 in call frame is reserved for function/closure, or "this" in methods
+        slot0_name = "this" if fn_type in (FunctionType.TYPE_METHOD, FunctionType.TYPE_INITIALIZER) else ""
+        self.locals.append(Local(name=slot0_name, depth=0))
 
     def is_global_scope(self) -> bool:
         return self.type == FunctionType.TYPE_SCRIPT and self.scope_depth == 0
@@ -175,7 +187,7 @@ class BytecodeCompiler(ASTVisitor):
 
     def compile_statement(self, stmt: ASTNode) -> None:
         self.visit(stmt)
-        if isinstance(stmt, (AssignmentNode, IndexAssignmentNode)):
+        if isinstance(stmt, (AssignmentNode, IndexAssignmentNode, SetPropertyNode)):
             self.emit_opcode(OpCode.OP_POP, stmt.line)
 
     # AST Visitor methods
@@ -427,12 +439,122 @@ class BytecodeCompiler(ASTVisitor):
         if self.type == FunctionType.TYPE_SCRIPT:
             raise CompileError("Cannot return from top-level code", node.line)
 
+        if self.type == FunctionType.TYPE_INITIALIZER:
+            if node.value is not None:
+                raise CompileError("Cannot return a value from an initializer", node.line)
+            self.emit_opcode(OpCode.OP_GET_LOCAL, node.line)
+            self.emit_u16(0, node.line)
+            self.emit_opcode(OpCode.OP_RETURN, node.line)
+            return
+
         if node.value:
             self.visit(node.value)
         else:
             self.emit_opcode(OpCode.OP_NIL, node.line)
 
         self.emit_opcode(OpCode.OP_RETURN, node.line)
+
+    def visit_ClassDefNode(self, node: ClassDefNode) -> None:
+        name_idx = self.chunk.add_constant(node.name)
+        self.emit_opcode(OpCode.OP_CLASS, node.line)
+        self.emit_u16(name_idx, node.line)
+
+        if not self.is_global_scope():
+            self.add_local(node.name, node.line)
+            self.mark_initialized()
+
+        if node.superclass:
+            if node.superclass == node.name:
+                raise CompileError("A class cannot inherit from itself", node.line)
+            self.visit_VariableNode(VariableNode(node.superclass, line=node.line))
+            self.emit_opcode(OpCode.OP_INHERIT, node.line)
+
+        for method in node.methods:
+            fn_type = FunctionType.TYPE_INITIALIZER if method.name == "init" else FunctionType.TYPE_METHOD
+            method_compiler = BytecodeCompiler(
+                fn_type=fn_type,
+                name=method.name,
+                enclosing=self,
+                current_class=node.name
+            )
+            method_compiler.function.arity = len(method.params)
+
+            for param in method.params:
+                method_compiler.add_local(param, method.line)
+                method_compiler.mark_initialized()
+
+            for stmt in method.body.statements:
+                method_compiler.visit(stmt)
+
+            if fn_type == FunctionType.TYPE_INITIALIZER:
+                method_compiler.emit_opcode(OpCode.OP_GET_LOCAL, method.line)
+                method_compiler.emit_u16(0, method.line)
+                method_compiler.emit_opcode(OpCode.OP_RETURN, method.line)
+            else:
+                method_compiler.emit_return(method.line)
+
+            compiled_method = method_compiler.function
+            compiled_method.upvalue_count = len(method_compiler.upvalues)
+            const_idx = self.chunk.add_constant(compiled_method)
+            self.emit_opcode(OpCode.OP_CLOSURE, method.line)
+            self.emit_u16(const_idx, method.line)
+
+            for u in method_compiler.upvalues:
+                self.emit_byte(1 if u.is_local else 0, method.line)
+                self.emit_u16(u.index, method.line)
+
+            method_name_idx = self.chunk.add_constant(method.name)
+            self.emit_opcode(OpCode.OP_METHOD, method.line)
+            self.emit_u16(method_name_idx, method.line)
+
+        if self.is_global_scope():
+            self.emit_opcode(OpCode.OP_DEFINE_GLOBAL, node.line)
+            self.emit_u16(name_idx, node.line)
+
+    def visit_GetPropertyNode(self, node: GetPropertyNode) -> None:
+        self.visit(node.target)
+        const_idx = self.chunk.add_constant(node.property_name)
+        self.emit_opcode(OpCode.OP_GET_PROPERTY, node.line)
+        self.emit_u16(const_idx, node.line)
+
+    def visit_SetPropertyNode(self, node: SetPropertyNode) -> None:
+        self.visit(node.target)
+        self.visit(node.value)
+        const_idx = self.chunk.add_constant(node.property_name)
+        self.emit_opcode(OpCode.OP_SET_PROPERTY, node.line)
+        self.emit_u16(const_idx, node.line)
+
+    def visit_ThisNode(self, node: ThisNode) -> None:
+        slot = self.resolve_local("this", node.line)
+        if slot is not None:
+            self.emit_opcode(OpCode.OP_GET_LOCAL, node.line)
+            self.emit_u16(slot, node.line)
+            return
+
+        upvalue = self.resolve_upvalue("this", node.line)
+        if upvalue is not None:
+            self.emit_opcode(OpCode.OP_GET_UPVALUE, node.line)
+            self.emit_u16(upvalue, node.line)
+            return
+
+        raise CompileError("Cannot use 'this' outside of a class method", node.line, node.column)
+
+    def visit_SuperPropertyNode(self, node: SuperPropertyNode) -> None:
+        slot = self.resolve_local("this", node.line)
+        if slot is not None:
+            self.emit_opcode(OpCode.OP_GET_LOCAL, node.line)
+            self.emit_u16(slot, node.line)
+        else:
+            upvalue = self.resolve_upvalue("this", node.line)
+            if upvalue is not None:
+                self.emit_opcode(OpCode.OP_GET_UPVALUE, node.line)
+                self.emit_u16(upvalue, node.line)
+            else:
+                raise CompileError("Cannot use 'super' outside of a class method", node.line, node.column)
+
+        name_idx = self.chunk.add_constant(node.property_name)
+        self.emit_opcode(OpCode.OP_GET_SUPER, node.line)
+        self.emit_u16(name_idx, node.line)
 
     def visit_PrintNode(self, node: PrintNode) -> None:
         self.visit(node.expression)

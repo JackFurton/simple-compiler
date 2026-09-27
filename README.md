@@ -13,6 +13,7 @@ It compiles a procedural scripting language down to compact bytecode instruction
 - **Compile-Time Optimization**: AST-level constant folding for arithmetic, string concatenations, and boolean logic, plus dead-code elimination for unreachable branches and loops.
 - **Bytecode Compiler**: Translates AST nodes into bytecode chunks with local variable slot resolution, jump patching for control flow, and nested function compilation.
 - **Lexical Closures & Upvalues**: First-class closures using Lua/Crafting Interpreters upvalues (`OP_CLOSURE`, `OP_GET_UPVALUE`, `OP_SET_UPVALUE`, `OP_CLOSE_UPVALUE`), supporting mutable captured state, multiple closures sharing identical upvalues, and arbitrary lexical nesting.
+- **Object-Oriented Programming (OOP)**: Class declarations, constructor initializers (`init`), instance fields (`obj.field`), methods with `this` binding, first-class bound methods, single inheritance (`class Child < Parent`), and `super` method invocation.
 - **Bytecode Serialization (.langc)**: Compiles source files into standalone `.langc` bytecode binaries with magic header validation for fast execution without re-parsing.
 - **Stack-based Virtual Machine**: Fast execution loop with `CallFrame` stack management, recursion depth protection, operand stack balancing, and descriptive stack traces on runtime errors.
 - **Disassembler**: Human-readable disassembly showing bytecode offsets, opcodes, constant pool references, closure upvalues, and jump targets.
@@ -62,7 +63,8 @@ simple-compiler/
 │   ├── functions_and_scopes.lang # Helper functions and native builtins
 │   ├── collections_and_builtins.lang # Lists, dicts, indexing, and methods
 │   ├── stdlib_demo.lang      # Math, string utils, and file I/O demo
-│   └── closures_demo.lang    # Lexical closures and shared upvalues demo
+│   ├── closures_demo.lang    # Lexical closures and shared upvalues demo
+│   └── classes_demo.lang     # Classes, methods, inheritance, and super demo
 ├── tests/
 │   ├── test_lexer.py         # Scanner unit tests
 │   ├── test_parser.py        # Parser & precedence unit tests
@@ -73,6 +75,7 @@ simple-compiler/
 │   ├── test_serializer.py    # Bytecode file serialization tests
 │   ├── test_stdlib.py        # Standard library unit tests
 │   ├── test_closures.py      # Lexical closures and upvalues unit tests
+│   ├── test_classes.py       # Classes, instances, and inheritance tests
 │   ├── test_basic.py         # Backward compatibility test suite
 │   └── run_tests.py          # Unified test runner
 └── main.py                   # CLI entrypoint and interactive REPL
@@ -235,6 +238,38 @@ write_file("output.txt", "Hello from simple-compiler!");
 let data = read_file("output.txt");
 print data;
 remove_file("output.txt");
+```
+
+### 8. Object-Oriented Programming (Classes & Inheritance)
+```javascript
+class Animal {
+    fn init(name) {
+        this.name = name;
+    }
+
+    fn speak() {
+        return this.name + " makes a sound.";
+    }
+}
+
+class Dog < Animal {
+    fn speak() {
+        return this.name + " barks: Woof!";
+    }
+}
+
+class GoldenRetriever < Dog {
+    fn speak() {
+        return super.speak() + " (and wags tail)";
+    }
+}
+
+let puppy = GoldenRetriever("Daisy");
+print puppy.speak(); // "Daisy barks: Woof! (and wags tail)"
+
+// First-class bound methods
+let speak_fn = puppy.speak;
+print speak_fn();
 ```
 
 ---

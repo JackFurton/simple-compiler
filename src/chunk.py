@@ -1,4 +1,4 @@
-from typing import List, Any, Optional
+from typing import List, Any, Optional, Dict
 from dataclasses import dataclass, field
 try:
     from .opcodes import OpCode
@@ -50,6 +50,7 @@ class FunctionObject:
     arity: int
     upvalue_count: int = 0
     chunk: Chunk = field(default_factory=Chunk)
+    klass: Optional[Any] = None
 
     def __repr__(self) -> str:
         return f"<fn {self.name}>" if self.name else "<script>"
@@ -94,5 +95,62 @@ class ClosureObject:
     def chunk(self) -> Chunk:
         return self.function.chunk
 
+    @property
+    def klass(self) -> Optional[Any]:
+        return self.function.klass
+
+    @klass.setter
+    def klass(self, val: Any) -> None:
+        self.function.klass = val
+
     def __repr__(self) -> str:
         return f"<fn {self.function.name}>" if self.function.name else "<script>"
+
+
+@dataclass
+class ClassObject:
+    name: str
+    methods: Dict[str, ClosureObject] = field(default_factory=dict)
+    superclass: Optional['ClassObject'] = None
+
+    def find_method(self, name: str) -> Optional[ClosureObject]:
+        if name in self.methods:
+            return self.methods[name]
+        if self.superclass is not None:
+            return self.superclass.find_method(name)
+        return None
+
+    def __repr__(self) -> str:
+        return f"<class {self.name}>"
+
+
+@dataclass
+class InstanceObject:
+    klass: ClassObject
+    fields: Dict[str, Any] = field(default_factory=dict)
+
+    def get_field(self, name: str) -> Any:
+        return self.fields.get(name)
+
+    def set_field(self, name: str, value: Any) -> None:
+        self.fields[name] = value
+
+    def __repr__(self) -> str:
+        return f"<instance of {self.klass.name}>"
+
+
+@dataclass
+class BoundMethod:
+    receiver: InstanceObject
+    method: ClosureObject
+
+    @property
+    def name(self) -> str:
+        return self.method.name
+
+    @property
+    def arity(self) -> int:
+        return self.method.arity
+
+    def __repr__(self) -> str:
+        return f"<bound method {self.method.name} of {self.receiver}>"
