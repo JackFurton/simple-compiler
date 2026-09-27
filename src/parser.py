@@ -8,7 +8,8 @@ try:
         VarDeclarationNode, BlockNode, IfNode, WhileNode,
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
-        IndexNode, IndexAssignmentNode
+        IndexNode, IndexAssignmentNode, ClassDefNode,
+        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
     )
 except ImportError:
     from tokens import Token, TokenType
@@ -19,7 +20,8 @@ except ImportError:
         VarDeclarationNode, BlockNode, IfNode, WhileNode,
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
-        IndexNode, IndexAssignmentNode
+        IndexNode, IndexAssignmentNode, ClassDefNode,
+        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
     )
 
 
@@ -84,6 +86,9 @@ class Parser:
         if self._check(TokenType.EOF):
             return None
 
+        if self._match(TokenType.CLASS):
+            return self._class_declaration()
+
         if self._match(TokenType.FN):
             return self._function_declaration()
 
@@ -91,6 +96,30 @@ class Parser:
             return self._var_declaration()
 
         return self._statement()
+
+    def _class_declaration(self) -> ClassDefNode:
+        token = self.previous_token
+        name_token = self._eat(TokenType.IDENTIFIER, "Expected class name")
+        name = name_token.value
+
+        superclass = None
+        if self._match(TokenType.LESS):
+            super_token = self._eat(TokenType.IDENTIFIER, "Expected superclass name after '<'")
+            superclass = super_token.value
+
+        self._skip_newlines()
+        self._eat(TokenType.LBRACE, "Expected '{' before class body")
+        self._skip_newlines()
+
+        methods: List[FunctionDefNode] = []
+        while not self._check(TokenType.RBRACE) and not self._check(TokenType.EOF):
+            self._match(TokenType.FN)
+            methods.append(self._function_declaration())
+            self._skip_newlines()
+
+        self._eat(TokenType.RBRACE, "Expected '}' after class body")
+        self._match(TokenType.SEMICOLON)
+        return ClassDefNode(name, superclass, methods, line=token.line, column=token.column)
 
     def _function_declaration(self) -> FunctionDefNode:
         token = self.previous_token
@@ -246,8 +275,8 @@ class Parser:
         expr = self._expression()
         self._match(TokenType.SEMICOLON)
 
-        # Preserve AssignmentNode and IndexAssignmentNode at statement level
-        if isinstance(expr, (AssignmentNode, IndexAssignmentNode)):
+        # Preserve AssignmentNode, IndexAssignmentNode, and SetPropertyNode at statement level
+        if isinstance(expr, (AssignmentNode, IndexAssignmentNode, SetPropertyNode)):
             return expr
         return ExpressionStmtNode(expr, line=token.line, column=token.column)
 
@@ -265,6 +294,8 @@ class Parser:
                 return AssignmentNode(expr.name, value, line=equals_token.line, column=equals_token.column)
             elif isinstance(expr, IndexNode):
                 return IndexAssignmentNode(expr.target, expr.index, value, line=equals_token.line, column=equals_token.column)
+            elif isinstance(expr, GetPropertyNode):
+                return SetPropertyNode(expr.target, expr.property_name, value, line=equals_token.line, column=equals_token.column)
 
             raise ParseError("Invalid assignment target", equals_token)
 
@@ -352,6 +383,10 @@ class Parser:
                 index = self._expression()
                 self._eat(TokenType.RBRACKET, "Expected ']' after index")
                 expr = IndexNode(expr, index, line=bracket_token.line, column=bracket_token.column)
+            elif self._match(TokenType.DOT):
+                dot_token = self.previous_token
+                name_token = self._eat(TokenType.IDENTIFIER, "Expected property name after '.'")
+                expr = GetPropertyNode(expr, name_token.value, line=dot_token.line, column=dot_token.column)
             else:
                 break
 
@@ -371,6 +406,16 @@ class Parser:
 
     def _primary(self) -> ASTNode:
         token = self.current_token
+
+        if self._match(TokenType.THIS):
+            this_token = self.previous_token
+            return ThisNode(line=this_token.line, column=this_token.column)
+
+        if self._match(TokenType.SUPER):
+            super_token = self.previous_token
+            self._eat(TokenType.DOT, "Expected '.' after 'super'")
+            name_token = self._eat(TokenType.IDENTIFIER, "Expected superclass method name")
+            return SuperPropertyNode(name_token.value, line=super_token.line, column=super_token.column)
 
         if self._match(TokenType.FALSE):
             return BooleanNode(False, line=token.line, column=token.column)

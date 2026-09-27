@@ -6,7 +6,8 @@ try:
         VarDeclarationNode, BlockNode, IfNode, WhileNode,
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
-        IndexNode, IndexAssignmentNode
+        IndexNode, IndexAssignmentNode, ClassDefNode,
+        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
     )
 except ImportError:
     from ast_nodes import (
@@ -15,7 +16,8 @@ except ImportError:
         VarDeclarationNode, BlockNode, IfNode, WhileNode,
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
-        IndexNode, IndexAssignmentNode
+        IndexNode, IndexAssignmentNode, ClassDefNode,
+        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
     )
 
 
@@ -90,6 +92,28 @@ class ASTOptimizer:
 
     def opt_IndexNode(self, node: IndexNode) -> IndexNode:
         return IndexNode(self.optimize(node.target), self.optimize(node.index), line=node.line, column=node.column)
+
+    def opt_ClassDefNode(self, node: ClassDefNode) -> ClassDefNode:
+        opt_methods = [self.opt_FunctionDefNode(m) for m in node.methods]
+        return ClassDefNode(node.name, node.superclass, opt_methods, line=node.line, column=node.column)
+
+    def opt_GetPropertyNode(self, node: GetPropertyNode) -> GetPropertyNode:
+        return GetPropertyNode(self.optimize(node.target), node.property_name, line=node.line, column=node.column)
+
+    def opt_SetPropertyNode(self, node: SetPropertyNode) -> SetPropertyNode:
+        return SetPropertyNode(
+            self.optimize(node.target),
+            node.property_name,
+            self.optimize(node.value),
+            line=node.line,
+            column=node.column
+        )
+
+    def opt_ThisNode(self, node: ThisNode) -> ThisNode:
+        return node
+
+    def opt_SuperPropertyNode(self, node: SuperPropertyNode) -> SuperPropertyNode:
+        return node
 
     def opt_IfNode(self, node: IfNode) -> Optional[ASTNode]:
         cond = self.optimize(node.condition)

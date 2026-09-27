@@ -29,6 +29,9 @@ class Lexer:
         'and': TokenType.AND,
         'or': TokenType.OR,
         'not': TokenType.NOT,
+        'class': TokenType.CLASS,
+        'this': TokenType.THIS,
+        'super': TokenType.SUPER,
     }
 
     def __init__(self, text: str):
@@ -226,6 +229,7 @@ class Lexer:
                 '[': TokenType.LBRACKET,
                 ']': TokenType.RBRACKET,
                 ':': TokenType.COLON,
+                '.': TokenType.DOT,
             }
 
             if self.current_char in char_map:

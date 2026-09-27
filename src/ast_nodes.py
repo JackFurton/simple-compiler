@@ -244,6 +244,61 @@ class IndexAssignmentNode(ASTNode):
 
 
 @dataclass
+class ClassDefNode(ASTNode):
+    name: str
+    superclass: Optional[str] = None
+    methods: List['FunctionDefNode'] = field(default_factory=list)
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        super_str = f" < {self.superclass}" if self.superclass else ""
+        return f"ClassDef({self.name}{super_str}, {len(self.methods)} methods)"
+
+
+@dataclass
+class GetPropertyNode(ASTNode):
+    target: ASTNode
+    property_name: str
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        return f"GetProp({self.target}.{self.property_name})"
+
+
+@dataclass
+class SetPropertyNode(ASTNode):
+    target: ASTNode
+    property_name: str
+    value: ASTNode
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        return f"SetProp({self.target}.{self.property_name} = {self.value})"
+
+
+@dataclass
+class ThisNode(ASTNode):
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        return "This()"
+
+
+@dataclass
+class SuperPropertyNode(ASTNode):
+    property_name: str
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        return f"SuperProp(super.{self.property_name})"
+
+
+@dataclass
 class ProgramNode(ASTNode):
     statements: List[ASTNode] = field(default_factory=list)
     line: int = 1
@@ -255,6 +310,21 @@ class ProgramNode(ASTNode):
 
 
 class ASTVisitor(ABC):
+    def visit_ClassDefNode(self, node: ClassDefNode) -> Any:
+        pass
+
+    def visit_GetPropertyNode(self, node: GetPropertyNode) -> Any:
+        pass
+
+    def visit_SetPropertyNode(self, node: SetPropertyNode) -> Any:
+        pass
+
+    def visit_ThisNode(self, node: ThisNode) -> Any:
+        pass
+
+    def visit_SuperPropertyNode(self, node: SuperPropertyNode) -> Any:
+        pass
+
     def visit_NumberNode(self, node: NumberNode) -> Any:
         pass
 

@@ -95,5 +95,13 @@ def disassemble_instruction(chunk: Chunk, offset: int) -> Tuple[str, int, Option
         arg_count = chunk.code[offset + 1]
         return f"{offset:04d} {line_str} {opcode.name:<18} args {arg_count}", offset + 2, None
 
+    elif opcode in (OpCode.OP_CLASS, OpCode.OP_METHOD, OpCode.OP_GET_PROPERTY, OpCode.OP_SET_PROPERTY, OpCode.OP_GET_SUPER):
+        const_idx = chunk.read_u16(offset + 1)
+        name = chunk.constants[const_idx]
+        return f"{offset:04d} {line_str} {opcode.name:<18} {const_idx:4d} ('{name}')", offset + 3, None
+
+    elif opcode == OpCode.OP_INHERIT:
+        return f"{offset:04d} {line_str} {opcode.name}", offset + 1, None
+
     else:
         return f"{offset:04d} {line_str} {opcode.name}", offset + 1, None

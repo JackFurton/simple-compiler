@@ -251,3 +251,13 @@ class ASTAnalyzer:
             self._analyze_node(node.index, depth + 1)
             if hasattr(node, 'value'):
                 self._analyze_node(node.value, depth + 1)
+
+        elif hasattr(node, 'methods'):
+            self.variables_defined.add(node.name)
+            for m in node.methods:
+                self._analyze_node(m, depth + 1)
+
+        elif hasattr(node, 'target') and hasattr(node, 'property_name'):
+            self._analyze_node(node.target, depth + 1)
+            if hasattr(node, 'value'):
+                self._analyze_node(node.value, depth + 1)
