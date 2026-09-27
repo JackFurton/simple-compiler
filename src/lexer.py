@@ -32,6 +32,7 @@ class Lexer:
         'class': TokenType.CLASS,
         'this': TokenType.THIS,
         'super': TokenType.SUPER,
+        'debugger': TokenType.DEBUGGER,
     }
 
     def __init__(self, text: str):

@@ -126,6 +126,28 @@ class Compiler:
         except IOError as e:
             raise CompilerError(f"Error reading file {filename}: {e}")
 
+    def debug_file(self, filename: str, optimize: bool = True) -> Any:
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                source = f.read()
+        except FileNotFoundError:
+            raise CompilerError(f"File not found: {filename}")
+        except IOError as e:
+            raise CompilerError(f"Error reading file {filename}: {e}")
+
+        try:
+            from .debugger import Debugger
+        except ImportError:
+            from debugger import Debugger
+
+        debugger = Debugger(self.vm, source=source, filename=filename, pause_at_start=True)
+        self.vm.debugger = debugger
+        fn = self.compile(source, optimize=optimize)
+        try:
+            return self.vm.interpret(fn)
+        except Exception as e:
+            raise CompilerError(f"Execution failed: {e}")
+
     def get_variables(self) -> Dict[str, Any]:
         return self.vm.globals.copy()
 

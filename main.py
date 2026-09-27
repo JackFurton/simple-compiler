@@ -171,6 +171,7 @@ Examples:
     parser.add_argument('--tokens', action='store_true', help='Show tokens instead of running')
     parser.add_argument('--ast', action='store_true', help='Show AST instead of running')
     parser.add_argument('--analyze', action='store_true', help='Analyze file instead of running')
+    parser.add_argument('--debug', action='store_true', help='Run source file with interactive step-debugger')
     parser.add_argument('--version', action='version', version='Simple Compiler 0.2.0')
 
     args = parser.parse_args()
@@ -205,6 +206,12 @@ Examples:
             sys.exit(1)
     elif args.analyze:
         analyze_file(args.file)
+    elif args.debug:
+        try:
+            compiler.debug_file(args.file, optimize=optimize)
+        except CompilerError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
         run_file(args.file, compiler)
 

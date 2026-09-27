@@ -6,10 +6,12 @@ try:
     from .opcodes import OpCode
     from .chunk import Chunk, FunctionObject, ClosureObject, ObjUpvalue, ClassObject, InstanceObject, BoundMethod
     from .stdlib import get_stdlib_functions, get_stdlib_constants
+    from .debugger import DebuggerExit
 except ImportError:
     from opcodes import OpCode
     from chunk import Chunk, FunctionObject, ClosureObject, ObjUpvalue, ClassObject, InstanceObject, BoundMethod
     from stdlib import get_stdlib_functions, get_stdlib_constants
+    from debugger import DebuggerExit
 
 
 class VMError(Exception):
@@ -67,6 +69,8 @@ class VM:
         self.open_upvalues: List[ObjUpvalue] = []
         self.globals: Dict[str, Any] = self._setup_globals()
         self.builtins: Dict[str, Callable] = self._setup_builtins()
+        self.debug_hook: Optional[Callable] = None
+        self.debugger: Optional[Any] = None
 
     def _setup_globals(self) -> Dict[str, Any]:
         return get_stdlib_constants().copy()
@@ -250,6 +254,14 @@ class VM:
                 self.frames.pop()
                 continue
 
+            try:
+                if self.debugger is not None:
+                    self.debugger.hook(self, frame)
+                elif self.debug_hook is not None:
+                    self.debug_hook(self, frame)
+            except DebuggerExit:
+                return None
+
             byte_val = frame.read_byte()
             try:
                 opcode = OpCode(byte_val)
@@ -394,6 +406,21 @@ class VM:
             elif opcode == OpCode.OP_PRINT:
                 val = self.pop()
                 self.output_callback(val)
+
+            elif opcode == OpCode.OP_DEBUGGER:
+                if self.debugger is not None:
+                    self.debugger.on_debugger_statement(frame)
+                elif self.debug_hook is not None:
+                    self.debug_hook(self, frame)
+                else:
+                    import sys
+                    if sys.stdin.isatty():
+                        try:
+                            from .debugger import Debugger
+                        except ImportError:
+                            from debugger import Debugger
+                        self.debugger = Debugger(self)
+                        self.debugger.on_debugger_statement(frame)
 
             elif opcode == OpCode.OP_JUMP:
                 offset = frame.read_u16()

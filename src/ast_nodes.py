@@ -299,6 +299,15 @@ class SuperPropertyNode(ASTNode):
 
 
 @dataclass
+class DebuggerNode(ASTNode):
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        return "Debugger()"
+
+
+@dataclass
 class ProgramNode(ASTNode):
     statements: List[ASTNode] = field(default_factory=list)
     line: int = 1
@@ -323,6 +332,9 @@ class ASTVisitor(ABC):
         pass
 
     def visit_SuperPropertyNode(self, node: SuperPropertyNode) -> Any:
+        pass
+
+    def visit_DebuggerNode(self, node: DebuggerNode) -> Any:
         pass
 
     def visit_NumberNode(self, node: NumberNode) -> Any:

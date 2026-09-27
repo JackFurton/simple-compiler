@@ -51,6 +51,7 @@ class FunctionObject:
     upvalue_count: int = 0
     chunk: Chunk = field(default_factory=Chunk)
     klass: Optional[Any] = None
+    debug_locals: Dict[int, str] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         return f"<fn {self.name}>" if self.name else "<script>"

@@ -9,7 +9,8 @@ try:
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
-        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
+        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
+        DebuggerNode
     )
 except ImportError:
     from tokens import Token, TokenType
@@ -21,7 +22,8 @@ except ImportError:
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
-        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
+        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
+        DebuggerNode
     )
 
 
@@ -171,6 +173,11 @@ class Parser:
 
         if self._match(TokenType.LBRACE):
             return self._block_statement()
+
+        if self._match(TokenType.DEBUGGER):
+            token = self.previous_token
+            self._match(TokenType.SEMICOLON)
+            return DebuggerNode(line=token.line, column=token.column)
 
         return self._expression_statement()
 
