@@ -5,9 +5,11 @@ from dataclasses import dataclass
 try:
     from .opcodes import OpCode
     from .chunk import Chunk, FunctionObject
+    from .stdlib import get_stdlib_functions, get_stdlib_constants
 except ImportError:
     from opcodes import OpCode
     from chunk import Chunk, FunctionObject
+    from stdlib import get_stdlib_functions, get_stdlib_constants
 
 
 class VMError(Exception):
@@ -48,11 +50,14 @@ class VM:
         self.output_callback = output_callback or print
         self.stack: List[Any] = []
         self.frames: List[CallFrame] = []
-        self.globals: Dict[str, Any] = {}
+        self.globals: Dict[str, Any] = self._setup_globals()
         self.builtins: Dict[str, Callable] = self._setup_builtins()
 
+    def _setup_globals(self) -> Dict[str, Any]:
+        return get_stdlib_constants().copy()
+
     def _setup_builtins(self) -> Dict[str, Callable]:
-        return {
+        builtins = {
             'clock': time.time,
             'len': lambda obj: len(obj) if hasattr(obj, '__len__') else 0,
             'str': str,
@@ -65,6 +70,8 @@ class VM:
             'keys': lambda d: list(d.keys()) if isinstance(d, dict) else [],
             'values': lambda d: list(d.values()) if isinstance(d, dict) else [],
         }
+        builtins.update(get_stdlib_functions())
+        return builtins
 
     def _builtin_type(self, val: Any) -> str:
         if val is None:

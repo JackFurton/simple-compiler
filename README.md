@@ -49,6 +49,7 @@ simple-compiler/
 │   ├── chunk.py              # Instruction stream, constant pool & FunctionObject
 │   ├── bytecode_compiler.py  # AST -> Bytecode compiler with local/global resolution
 │   ├── serializer.py         # Bytecode serialization & deserialization (.langc)
+│   ├── stdlib.py             # Standard library (math, file I/O, strings, system)
 │   ├── vm.py                 # Stack Virtual Machine with CallFrames
 │   ├── disassembler.py       # Bytecode disassembler
 │   ├── interpreter.py        # Tree-walk AST interpreter (for dual-backend testing)
@@ -58,7 +59,8 @@ simple-compiler/
 │   ├── control_flow.lang     # While loop, if/else, and block scoping
 │   ├── fibonacci.lang        # Recursion and conditional branching
 │   ├── functions_and_scopes.lang # Helper functions and native builtins
-│   └── collections_and_builtins.lang # Lists, dicts, indexing, and methods
+│   ├── collections_and_builtins.lang # Lists, dicts, indexing, and methods
+│   └── stdlib_demo.lang      # Math, string utils, and file I/O demo
 ├── tests/
 │   ├── test_lexer.py         # Scanner unit tests
 │   ├── test_parser.py        # Parser & precedence unit tests
@@ -67,6 +69,7 @@ simple-compiler/
 │   ├── test_collections.py   # Lists, dicts, and indexing unit tests
 │   ├── test_optimizer.py     # Constant folding and DCE unit tests
 │   ├── test_serializer.py    # Bytecode file serialization tests
+│   ├── test_stdlib.py        # Standard library unit tests
 │   ├── test_basic.py         # Backward compatibility test suite
 │   └── run_tests.py          # Unified test runner
 └── main.py                   # CLI entrypoint and interactive REPL
@@ -176,6 +179,26 @@ fn fib(n) {
 }
 
 print fib(10); // Outputs: 55
+```
+
+### 6. Standard Library Built-ins
+```javascript
+// Math
+print sqrt(144); // 12
+print round(PI, 2); // 3.14
+print max(10, 50); // 50
+
+// String operations
+let text = "  hello world  ";
+print to_upper(trim(text)); // "HELLO WORLD"
+let words = split(trim(text), " ");
+print join(words, "-"); // "hello-world"
+
+// File I/O
+write_file("output.txt", "Hello from simple-compiler!");
+let data = read_file("output.txt");
+print data;
+remove_file("output.txt");
 ```
 
 ---
