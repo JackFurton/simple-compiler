@@ -15,6 +15,7 @@ tests = [
     "test_stdlib.py",
     "test_closures.py",
     "test_classes.py",
+    "test_debugger.py",
     "test_basic.py",
 ]
 

@@ -341,6 +341,11 @@ class Interpreter(ASTVisitor):
     def visit_ExpressionStmtNode(self, node: ExpressionStmtNode) -> Any:
         return self.visit(node.expression)
 
+    def visit_DebuggerNode(self, node: DebuggerNode) -> Any:
+        if hasattr(self, "debugger") and self.debugger is not None:
+            return self.debugger.on_ast_debugger(node)
+        return None
+
     def get_variables(self) -> Dict[str, Any]:
         return self.environment.variables.copy()
 

@@ -62,5 +62,6 @@ class OpCode(IntEnum):
     OP_GET_INDEX = auto()      # [index, target] -> target[index]
     OP_SET_INDEX = auto()      # [val, index, target] -> target[index] = val
 
-    # Output
+    # Output & Debugging
     OP_PRINT = auto()          # pops val, outputs it
+    OP_DEBUGGER = auto()       # triggers debugger breakpoint

@@ -11,7 +11,8 @@ try:
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
-        ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
+        ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
+        DebuggerNode
     )
     from .opcodes import OpCode
     from .chunk import Chunk, FunctionObject
@@ -24,7 +25,8 @@ except ImportError:
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
-        ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
+        ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
+        DebuggerNode
     )
     from opcodes import OpCode
     from chunk import Chunk, FunctionObject
@@ -77,6 +79,8 @@ class BytecodeCompiler(ASTVisitor):
         # Slot 0 in call frame is reserved for function/closure, or "this" in methods
         slot0_name = "this" if fn_type in (FunctionType.TYPE_METHOD, FunctionType.TYPE_INITIALIZER) else ""
         self.locals.append(Local(name=slot0_name, depth=0))
+        if slot0_name:
+            self.function.debug_locals[0] = slot0_name
 
     def is_global_scope(self) -> bool:
         return self.type == FunctionType.TYPE_SCRIPT and self.scope_depth == 0
@@ -179,7 +183,9 @@ class BytecodeCompiler(ASTVisitor):
                 raise CompileError(f"Variable '{name}' already declared in this scope", line)
 
         self.locals.append(Local(name=name, depth=-1))
-        return len(self.locals) - 1
+        slot = len(self.locals) - 1
+        self.function.debug_locals[slot] = name
+        return slot
 
     def mark_initialized(self) -> None:
         if self.locals:
@@ -563,3 +569,6 @@ class BytecodeCompiler(ASTVisitor):
     def visit_ExpressionStmtNode(self, node: ExpressionStmtNode) -> None:
         self.visit(node.expression)
         self.emit_opcode(OpCode.OP_POP, node.line)
+
+    def visit_DebuggerNode(self, node: DebuggerNode) -> None:
+        self.emit_opcode(OpCode.OP_DEBUGGER, node.line)

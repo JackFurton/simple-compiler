@@ -111,6 +111,11 @@ python3 main.py examples/fibonacci.langc
 python3 main.py --disasm examples/fibonacci.lang
 ```
 
+### Interactive Step-Debugger
+```bash
+python3 main.py --debug examples/debugger_demo.lang
+```
+
 ### Inspecting AST or Tokens
 ```bash
 python3 main.py --ast examples/control_flow.lang
@@ -271,6 +276,42 @@ print puppy.speak(); // "Daisy barks: Woof! (and wags tail)"
 let speak_fn = puppy.speak;
 print speak_fn();
 ```
+
+### 9. Interactive Step-Debugger & Breakpoints
+The compiler includes a step-debugger with REPL inspection:
+```javascript
+fn compute(n) {
+    let result = n * 2;
+    debugger; // Embedded breakpoint statement pauses into the interactive debugger
+    return result;
+}
+
+compute(10);
+```
+
+Run with `--debug`:
+```bash
+python3 main.py --debug script.lang
+```
+
+Available debugger commands:
+- `step`, `s`: Step to next source line (steps into functions)
+- `next`, `n`: Step over to next source line in current function
+- `stepi`, `si`: Step single bytecode instruction
+- `finish`, `fin`: Run until current function returns (step out)
+- `continue`, `c`: Resume execution until next breakpoint or exit
+- `break`, `b <loc>`: Set breakpoint at line (e.g. `b 12`) or function (e.g. `b compute`)
+- `delete`, `d [id]`: Delete breakpoint by ID, or delete all if omitted
+- `breakpoints`, `info b`: List all active breakpoints and hit counts
+- `stack`: Inspect operand stack with types and values
+- `frames`, `bt`: Inspect call stack frames and instruction pointers
+- `locals`: Show local variables in the current frame
+- `globals`: Show user-defined global variables
+- `print`, `p <expr>`: Inspect variable or property (e.g. `p x`, `p user.name`)
+- `disasm`, `dis`: Disassemble bytecode around current instruction pointer
+- `list`, `l`: View source code context with pointer to current line
+- `quit`, `q`: Cleanly abort execution and exit debugger
+- `help`, `h`: Show help guide
 
 ---
 

@@ -1,0 +1,52 @@
+// Simple Compiler - Interactive Debugger Demo
+//
+// You can run this with:
+//   python3 main.py --debug examples/debugger_demo.lang
+//
+// Debugger commands to try:
+//   (lang-db) step             // Step to next source line (steps into functions)
+//   (lang-db) next             // Step to next source line in current frame (step over)
+//   (lang-db) stepi            // Step a single bytecode instruction
+//   (lang-db) finish           // Step out of current function
+//   (lang-db) break 19         // Set breakpoint at line 19
+//   (lang-db) break factorial  // Set breakpoint at function factorial()
+//   (lang-db) continue         // Resume until breakpoint or debugger; statement
+//   (lang-db) stack            // Inspect operand stack
+//   (lang-db) frames           // Inspect call frames
+//   (lang-db) locals           // Inspect local variables
+//   (lang-db) globals          // Inspect global variables
+//   (lang-db) print x          // Inspect variable value
+//   (lang-db) disasm           // Disassemble bytecode around current instruction
+//   (lang-db) list             // View source context
+
+fn factorial(n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+class Counter {
+    init(start) {
+        this.count = start;
+    }
+
+    increment(amount) {
+        this.count = this.count + amount;
+        return this.count;
+    }
+}
+
+let num = 4;
+print "Calculating factorial...";
+let fact = factorial(num);
+print fact;
+
+let counter = Counter(10);
+counter.increment(5);
+
+// Embedded breakpoint using the debugger; statement:
+debugger;
+
+let final_val = counter.increment(10);
+print final_val;

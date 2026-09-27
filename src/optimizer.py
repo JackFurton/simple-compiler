@@ -7,7 +7,8 @@ try:
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
-        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
+        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
+        DebuggerNode
     )
 except ImportError:
     from ast_nodes import (
@@ -17,7 +18,8 @@ except ImportError:
         FunctionDefNode, CallNode, ReturnNode, PrintNode,
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
-        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode
+        GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
+        DebuggerNode
     )
 
 
@@ -212,3 +214,6 @@ class ASTOptimizer:
                 return right
 
         return BinaryOpNode(left, op, right, line=node.line, column=node.column)
+
+    def opt_DebuggerNode(self, node: DebuggerNode) -> DebuggerNode:
+        return node
