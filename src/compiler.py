@@ -135,6 +135,7 @@ class Compiler:
 
     def clear_variables(self) -> None:
         self.vm.globals.clear()
+        self.vm.globals.update(self.vm._setup_globals())
         self.interpreter.clear_variables()
 
     def debug_tokens(self, source: str) -> None:

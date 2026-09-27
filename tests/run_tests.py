@@ -12,6 +12,7 @@ tests = [
     "test_collections.py",
     "test_optimizer.py",
     "test_serializer.py",
+    "test_stdlib.py",
     "test_basic.py",
 ]
 

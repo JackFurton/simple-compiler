@@ -35,6 +35,7 @@ jobs:
           python main.py examples/fibonacci.lang
           python main.py examples/functions_and_scopes.lang
           python main.py examples/collections_and_builtins.lang
+          python main.py examples/stdlib_demo.lang
 
       - name: Test bytecode compilation and .langc execution
         run: |

@@ -9,6 +9,7 @@ from .vm import VM, VMError
 from .disassembler import disassemble_chunk
 from .optimizer import ASTOptimizer
 from .serializer import serialize_bytecode, deserialize_bytecode
+from .stdlib import get_stdlib_functions, get_stdlib_constants
 from .interpreter import Interpreter, RuntimeError, interpret_string
 from .compiler import Compiler, CompilerError
 
