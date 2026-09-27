@@ -1,0 +1,59 @@
+// Simple Compiler - Native C Transpilation Demo
+//
+// Build and run standalone native executable:
+//   python3 main.py --build examples/native_demo.lang -o demo_bin
+//   ./demo_bin
+//
+// Or emit C source code directly:
+//   python3 main.py --emit-c examples/native_demo.lang -o demo.c
+//   gcc demo.c -o demo_bin -lm
+
+fn is_prime(n) {
+    if (n <= 1) {
+        return false;
+    }
+    let d = 2;
+    while (d * d <= n) {
+        if (n % d == 0) {
+            return false;
+        }
+        d = d + 1;
+    }
+    return true;
+}
+
+class Vector2D {
+    init(x, y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    magnitude() {
+        return sqrt(this.x * this.x + this.y * this.y);
+    }
+
+    describe() {
+        return "Vector(" + str(this.x) + ", " + str(this.y) + ")";
+    }
+}
+
+print "--- Prime Numbers up to 20 ---";
+let i = 2;
+while (i <= 20) {
+    if (is_prime(i)) {
+        print i;
+    }
+    i = i + 1;
+}
+
+print "--- Vector Math ---";
+let vec = Vector2D(3, 4);
+print vec.describe();
+print vec.magnitude();
+
+print "--- Collections in Native C ---";
+let fruits = ["apple", "banana", "cherry"];
+append(fruits, "date");
+print len(fruits);
+print fruits[0];
+print fruits[3];

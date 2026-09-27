@@ -172,6 +172,8 @@ Examples:
     parser.add_argument('--ast', action='store_true', help='Show AST instead of running')
     parser.add_argument('--analyze', action='store_true', help='Analyze file instead of running')
     parser.add_argument('--debug', action='store_true', help='Run source file with interactive step-debugger')
+    parser.add_argument('--emit-c', action='store_true', help='Transpile source file to C source code')
+    parser.add_argument('--build', action='store_true', help='Compile source file to native executable with C backend')
     parser.add_argument('--version', action='version', version='Simple Compiler 0.2.0')
 
     args = parser.parse_args()
@@ -209,6 +211,20 @@ Examples:
     elif args.debug:
         try:
             compiler.debug_file(args.file, optimize=optimize)
+        except CompilerError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif args.emit_c:
+        try:
+            out_c = compiler.emit_c_file(args.file, args.output, optimize=optimize)
+            print(f"Emitted C code: {out_c}")
+        except CompilerError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif args.build:
+        try:
+            out_bin = compiler.build_native(args.file, args.output, optimize=optimize)
+            print(f"Built native executable: {out_bin}")
         except CompilerError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)

@@ -148,6 +148,62 @@ class Compiler:
         except Exception as e:
             raise CompilerError(f"Execution failed: {e}")
 
+    def transpile_to_c(self, source: str, optimize: bool = True) -> str:
+        ast = self.parse(source)
+        if optimize:
+            optimizer = ASTOptimizer()
+            ast = optimizer.optimize(ast)
+        try:
+            from .c_transpiler import CTranspiler
+        except ImportError:
+            from c_transpiler import CTranspiler
+        transpiler = CTranspiler(include_runtime=True)
+        return transpiler.transpile(ast)
+
+    def emit_c_file(self, source_filename: str, output_c_filename: Optional[str] = None, optimize: bool = True) -> str:
+        try:
+            with open(source_filename, 'r', encoding='utf-8') as f:
+                source = f.read()
+        except FileNotFoundError:
+            raise CompilerError(f"File not found: {source_filename}")
+        except IOError as e:
+            raise CompilerError(f"Error reading file {source_filename}: {e}")
+
+        c_code = self.transpile_to_c(source, optimize=optimize)
+        if output_c_filename is None:
+            p = Path(source_filename)
+            output_c_filename = str(p.with_suffix('.c'))
+
+        try:
+            with open(output_c_filename, 'w', encoding='utf-8') as f:
+                f.write(c_code)
+            return output_c_filename
+        except Exception as e:
+            raise CompilerError(f"Failed to write C file '{output_c_filename}': {e}")
+
+    def build_native(self, source_filename: str, output_binary: Optional[str] = None, optimize: bool = True, cc: Optional[str] = None) -> str:
+        import subprocess
+        import shutil
+
+        compiler_cmd = cc
+        if compiler_cmd is None:
+            compiler_cmd = shutil.which("gcc") or shutil.which("clang") or "gcc"
+
+        p = Path(source_filename)
+        c_file = str(p.with_suffix('.c'))
+        self.emit_c_file(source_filename, c_file, optimize=optimize)
+
+        if output_binary is None:
+            output_binary = str(p.with_suffix(''))
+
+        try:
+            res = subprocess.run([compiler_cmd, c_file, "-o", output_binary, "-lm"], capture_output=True, text=True)
+            if res.returncode != 0:
+                raise CompilerError(f"C compilation failed:\n{res.stderr}")
+            return output_binary
+        except FileNotFoundError:
+            raise CompilerError(f"C compiler '{compiler_cmd}' not found on system PATH.")
+
     def get_variables(self) -> Dict[str, Any]:
         return self.vm.globals.copy()
 
