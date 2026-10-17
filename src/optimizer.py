@@ -8,7 +8,7 @@ try:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode
+        DebuggerNode, TryCatchNode, ThrowNode, LambdaNode
     )
 except ImportError:
     from ast_nodes import (
@@ -19,7 +19,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode
+        DebuggerNode, TryCatchNode, ThrowNode, LambdaNode
     )
 
 
@@ -78,6 +78,10 @@ class ASTOptimizer:
     def opt_FunctionDefNode(self, node: FunctionDefNode) -> FunctionDefNode:
         opt_body = self.opt_BlockNode(node.body)
         return FunctionDefNode(node.name, node.params, opt_body, line=node.line, column=node.column)
+
+    def opt_LambdaNode(self, node: LambdaNode) -> LambdaNode:
+        opt_body = self.opt_BlockNode(node.body)
+        return LambdaNode(node.params, opt_body, line=node.line, column=node.column)
 
     def opt_CallNode(self, node: CallNode) -> CallNode:
         opt_callee = self.optimize(node.callee)

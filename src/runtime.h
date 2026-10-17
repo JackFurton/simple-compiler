@@ -19,7 +19,8 @@ typedef enum {
     VAL_DICT,
     VAL_CLASS,
     VAL_INSTANCE,
-    VAL_METHOD
+    VAL_METHOD,
+    VAL_FUNCTION
 } ValueType;
 
 struct ObjString;
@@ -28,6 +29,9 @@ struct ObjDict;
 struct ObjClass;
 struct ObjInstance;
 struct ObjMethod;
+struct Value;
+
+typedef struct Value (*FunctionFn)(int arg_count, struct Value* args);
 
 typedef struct Value {
     ValueType type;
@@ -41,6 +45,7 @@ typedef struct Value {
         struct ObjClass* klass;
         struct ObjInstance* instance;
         struct ObjMethod* method;
+        FunctionFn function;
     } as;
 } Value;
 
@@ -141,6 +146,13 @@ static inline Value val_string(const char* s) {
     return v;
 }
 
+static inline Value val_function(FunctionFn fn) {
+    Value v;
+    v.type = VAL_FUNCTION;
+    v.as.function = fn;
+    return v;
+}
+
 static inline bool is_numeric(Value v) {
     return v.type == VAL_INT || v.type == VAL_NUMBER;
 }
@@ -192,6 +204,8 @@ static inline char* val_to_cstr(Value v) {
             return strdup(buffer);
         case VAL_METHOD:
             return strdup("<bound method>");
+        case VAL_FUNCTION:
+            return strdup("<function>");
         default:
             return strdup("<object>");
     }
@@ -248,6 +262,9 @@ static inline void val_print_raw(Value v) {
             break;
         case VAL_METHOD:
             printf("<bound method>");
+            break;
+        case VAL_FUNCTION:
+            printf("<function>");
             break;
     }
 }
@@ -614,6 +631,7 @@ static inline Value val_type_name(Value v) {
         case VAL_CLASS: return val_string("class");
         case VAL_INSTANCE: return val_string("instance");
         case VAL_METHOD: return val_string("method");
+        case VAL_FUNCTION: return val_string("function");
         default: return val_string("object");
     }
 }
@@ -776,6 +794,82 @@ static inline Value val_call_method(Value target, const char* prop, int arg_coun
         }
     }
     return val_nil();
+}
+
+static inline Value val_call(Value callee, int arg_count, Value* args) {
+    if (callee.type == VAL_FUNCTION && callee.as.function) {
+        return callee.as.function(arg_count, args);
+    }
+    if (callee.type == VAL_METHOD && callee.as.method) {
+        return callee.as.method->fn(callee.as.method->receiver, arg_count, args);
+    }
+    val_throw(val_string("Can only call functions"));
+    return val_nil();
+}
+
+static inline Value val_map(Value arg1, Value arg2) {
+    Value fn = arg1;
+    Value seq = arg2;
+    if ((arg1.type == VAL_LIST || arg1.type == VAL_STRING) && (arg2.type != VAL_LIST && arg2.type != VAL_STRING)) {
+        seq = arg1;
+        fn = arg2;
+    }
+    int len = (int)val_len(seq).as.integer;
+    Value res = val_make_list(0, NULL);
+    for (int i = 0; i < len; i++) {
+        Value item = val_get_index(seq, val_int_val(i));
+        Value args[1] = { item };
+        val_append(res, val_call(fn, 1, args));
+    }
+    return res;
+}
+
+static inline Value val_filter(Value arg1, Value arg2) {
+    Value fn = arg1;
+    Value seq = arg2;
+    if ((arg1.type == VAL_LIST || arg1.type == VAL_STRING) && (arg2.type != VAL_LIST && arg2.type != VAL_STRING)) {
+        seq = arg1;
+        fn = arg2;
+    }
+    int len = (int)val_len(seq).as.integer;
+    Value res = val_make_list(0, NULL);
+    for (int i = 0; i < len; i++) {
+        Value item = val_get_index(seq, val_int_val(i));
+        Value args[1] = { item };
+        if (val_is_truthy(val_call(fn, 1, args))) {
+            val_append(res, item);
+        }
+    }
+    return res;
+}
+
+static inline Value val_reduce(Value arg1, Value arg2, bool has_init, Value initial) {
+    Value fn = arg1;
+    Value seq = arg2;
+    if ((arg1.type == VAL_LIST || arg1.type == VAL_STRING) && (arg2.type != VAL_LIST && arg2.type != VAL_STRING)) {
+        seq = arg1;
+        fn = arg2;
+    }
+    int len = (int)val_len(seq).as.integer;
+    Value acc;
+    int start_idx = 0;
+    if (has_init) {
+        acc = initial;
+        start_idx = 0;
+    } else {
+        if (len == 0) {
+            val_throw(val_string("reduce() of empty sequence with no initial value"));
+            return val_nil();
+        }
+        acc = val_get_index(seq, val_int_val(0));
+        start_idx = 1;
+    }
+    for (int i = start_idx; i < len; i++) {
+        Value item = val_get_index(seq, val_int_val(i));
+        Value args[2] = { acc, item };
+        acc = val_call(fn, 2, args);
+    }
+    return acc;
 }
 
 #endif // SIMPLE_RUNTIME_H

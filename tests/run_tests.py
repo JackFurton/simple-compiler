@@ -19,6 +19,7 @@ tests = [
     "test_c_transpiler.py",
     "test_exceptions.py",
     "test_loops_and_ergonomics.py",
+    "test_lambdas.py",
     "test_basic.py",
 ]
 

@@ -158,6 +158,18 @@ class FunctionDefNode(ASTNode):
 
 
 @dataclass
+class LambdaNode(ASTNode):
+    params: List[str]
+    body: BlockNode
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        params_str = ", ".join(self.params)
+        return f"Lambda(({params_str}) {self.body})"
+
+
+@dataclass
 class CallNode(ASTNode):
     callee: ASTNode
     arguments: List[ASTNode] = field(default_factory=list)
@@ -363,6 +375,9 @@ class ProgramNode(ASTNode):
 
 
 class ASTVisitor(ABC):
+    def visit_LambdaNode(self, node: LambdaNode) -> Any:
+        pass
+
     def visit_BreakNode(self, node: BreakNode) -> Any:
         pass
 

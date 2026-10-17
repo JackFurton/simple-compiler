@@ -162,6 +162,76 @@ class Interpreter(ASTVisitor):
         self.globals.define('pop', lambda lst, *args: lst.pop(*args) if lst else None)
         self.globals.define('keys', lambda d: list(d.keys()) if isinstance(d, dict) else [])
         self.globals.define('values', lambda d: list(d.values()) if isinstance(d, dict) else [])
+        self.globals.define('type', self._builtin_type)
+        self.globals.define('map', self._builtin_map)
+        self.globals.define('filter', self._builtin_filter)
+        self.globals.define('reduce', self._builtin_reduce)
+
+    def _builtin_type(self, val: Any) -> str:
+        if val is None:
+            return "nil"
+        if isinstance(val, bool):
+            return "bool"
+        if isinstance(val, (int, float)):
+            return "number"
+        if isinstance(val, str):
+            return "string"
+        if isinstance(val, list):
+            return "list"
+        if isinstance(val, dict):
+            return "dict"
+        if isinstance(val, InterpreterClass):
+            return "class"
+        if isinstance(val, InterpreterInstance):
+            return "instance"
+        if isinstance(val, UserFunction) or callable(val):
+            return "function"
+        return type(val).__name__
+
+    def _invoke_callable(self, callee: Any, *args) -> Any:
+        if isinstance(callee, (UserFunction, InterpreterClass)):
+            return callee.call(self, list(args))
+        if callable(callee):
+            return callee(*args)
+        raise RuntimeError(f"Can only call functions, got {type(callee).__name__}")
+
+    def _builtin_map(self, arg1: Any, arg2: Any) -> list:
+        if isinstance(arg1, (list, str)) and not isinstance(arg2, (list, str)):
+            iterable, fn = arg1, arg2
+        else:
+            fn, iterable = arg1, arg2
+        if not isinstance(iterable, (list, str)):
+            raise RuntimeError("map() expects a list or string")
+        return [self._invoke_callable(fn, item) for item in iterable]
+
+    def _builtin_filter(self, arg1: Any, arg2: Any) -> list:
+        if isinstance(arg1, (list, str)) and not isinstance(arg2, (list, str)):
+            iterable, fn = arg1, arg2
+        else:
+            fn, iterable = arg1, arg2
+        if not isinstance(iterable, (list, str)):
+            raise RuntimeError("filter() expects a list or string")
+        return [item for item in iterable if bool(self._invoke_callable(fn, item))]
+
+    def _builtin_reduce(self, arg1: Any, arg2: Any, *rest) -> Any:
+        if isinstance(arg1, (list, str)) and not isinstance(arg2, (list, str)):
+            iterable, fn = arg1, arg2
+        else:
+            fn, iterable = arg1, arg2
+        if not isinstance(iterable, (list, str)):
+            raise RuntimeError("reduce() expects a list or string")
+        items = list(iterable)
+        if rest:
+            acc = rest[0]
+            start_idx = 0
+        else:
+            if not items:
+                raise RuntimeError("reduce() of empty sequence with no initial value")
+            acc = items[0]
+            start_idx = 1
+        for i in range(start_idx, len(items)):
+            acc = self._invoke_callable(fn, acc, items[i])
+        return acc
 
     def interpret(self, node: ASTNode) -> Any:
         try:
@@ -266,6 +336,9 @@ class Interpreter(ASTVisitor):
         fn = UserFunction(node, self.environment)
         self.environment.define(node.name, fn)
         return fn
+
+    def visit_LambdaNode(self, node: LambdaNode) -> Any:
+        return UserFunction(node, self.environment)
 
     def visit_CallNode(self, node: CallNode) -> Any:
         callee = self.visit(node.callee)
