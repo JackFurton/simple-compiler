@@ -17,6 +17,7 @@ tests = [
     "test_classes.py",
     "test_debugger.py",
     "test_c_transpiler.py",
+    "test_exceptions.py",
     "test_basic.py",
 ]
 

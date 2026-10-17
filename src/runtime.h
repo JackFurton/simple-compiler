@@ -7,6 +7,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <setjmp.h>
 
 typedef enum {
     VAL_NIL,
@@ -257,6 +258,27 @@ static inline Value val_print(Value v) {
     return val_nil();
 }
 
+// Exception Handling (setjmp / longjmp stack)
+typedef struct ExceptionFrame {
+    jmp_buf env;
+} ExceptionFrame;
+
+static ExceptionFrame _exc_stack[256];
+static int _exc_top = 0;
+static Value _current_exception;
+
+static inline void val_throw(Value err) {
+    _current_exception = err;
+    if (_exc_top > 0) {
+        _exc_top--;
+        longjmp(_exc_stack[_exc_top].env, 1);
+    }
+    fprintf(stderr, "Uncaught exception: ");
+    val_print_raw(err);
+    fprintf(stderr, "\n");
+    exit(1);
+}
+
 // Operators
 static inline Value val_add(Value a, Value b) {
     if (a.type == VAL_INT && b.type == VAL_INT) {
@@ -310,17 +332,23 @@ static inline Value val_mul(Value a, Value b) {
 
 static inline Value val_div(Value a, Value b) {
     double db = as_double(b);
-    if (db == 0.0) db = 1.0;
+    if (db == 0.0) {
+        val_throw(val_string("Division by zero"));
+    }
     return val_number(as_double(a) / db);
 }
 
 static inline Value val_mod(Value a, Value b) {
     if (a.type == VAL_INT && b.type == VAL_INT) {
-        long long ib = b.as.integer != 0 ? b.as.integer : 1;
-        return val_int_val(a.as.integer % ib);
+        if (b.as.integer == 0) {
+            val_throw(val_string("Modulo by zero"));
+        }
+        return val_int_val(a.as.integer % b.as.integer);
     }
     double db = as_double(b);
-    if (db == 0.0) db = 1.0;
+    if (db == 0.0) {
+        val_throw(val_string("Modulo by zero"));
+    }
     return val_number(fmod(as_double(a), db));
 }
 

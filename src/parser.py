@@ -10,7 +10,7 @@ try:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode
+        DebuggerNode, TryCatchNode, ThrowNode
     )
 except ImportError:
     from tokens import Token, TokenType
@@ -23,7 +23,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode
+        DebuggerNode, TryCatchNode, ThrowNode
     )
 
 
@@ -171,6 +171,12 @@ class Parser:
         if self._match(TokenType.RETURN):
             return self._return_statement()
 
+        if self._match(TokenType.TRY):
+            return self._try_statement()
+
+        if self._match(TokenType.THROW):
+            return self._throw_statement()
+
         if self._match(TokenType.LBRACE):
             return self._block_statement()
 
@@ -180,6 +186,37 @@ class Parser:
             return DebuggerNode(line=token.line, column=token.column)
 
         return self._expression_statement()
+
+    def _try_statement(self) -> TryCatchNode:
+        token = self.previous_token
+        self._skip_newlines()
+        self._eat(TokenType.LBRACE, "Expected '{' after 'try'")
+        try_block = self._block_statement()
+
+        self._skip_newlines()
+        self._eat(TokenType.CATCH, "Expected 'catch' after try block")
+        self._skip_newlines()
+
+        catch_var = None
+        if self._match(TokenType.LPAREN):
+            var_tok = self._eat(TokenType.IDENTIFIER, "Expected exception variable name in catch")
+            catch_var = var_tok.value
+            self._eat(TokenType.RPAREN, "Expected ')' after catch variable")
+        elif self._check(TokenType.IDENTIFIER):
+            var_tok = self._eat(TokenType.IDENTIFIER, "Expected exception variable name in catch")
+            catch_var = var_tok.value
+
+        self._skip_newlines()
+        self._eat(TokenType.LBRACE, "Expected '{' before catch block")
+        catch_block = self._block_statement()
+
+        return TryCatchNode(try_block, catch_var, catch_block, line=token.line, column=token.column)
+
+    def _throw_statement(self) -> ThrowNode:
+        token = self.previous_token
+        expr = self._expression()
+        self._match(TokenType.SEMICOLON)
+        return ThrowNode(expr, line=token.line, column=token.column)
 
     def _print_statement(self) -> PrintNode:
         token = self.previous_token

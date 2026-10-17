@@ -339,3 +339,9 @@ class ASTAnalyzer:
             self._analyze_node(node.target, depth + 1)
             if hasattr(node, 'value'):
                 self._analyze_node(node.value, depth + 1)
+
+        elif hasattr(node, 'try_block') and hasattr(node, 'catch_block'):
+            self._analyze_node(node.try_block, depth + 1)
+            if getattr(node, 'catch_var', None):
+                self.variables_defined.add(node.catch_var)
+            self._analyze_node(node.catch_block, depth + 1)

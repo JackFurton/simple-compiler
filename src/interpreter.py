@@ -14,6 +14,12 @@ class ReturnException(Exception):
         self.value = value
 
 
+class ThrownException(Exception):
+    def __init__(self, value: Any):
+        self.value = value
+        super().__init__(str(value))
+
+
 class Environment:
     def __init__(self, parent: Optional['Environment'] = None):
         self.parent = parent
@@ -125,9 +131,36 @@ class Interpreter(ASTVisitor):
         self.globals = Environment()
         self.environment = self.globals
         self.output_callback = output_callback or print
+        self._setup_builtins()
+
+    def _setup_builtins(self) -> None:
+        import time
+        try:
+            from .stdlib import get_stdlib_functions, get_stdlib_constants
+        except ImportError:
+            from stdlib import get_stdlib_functions, get_stdlib_constants
+
+        for k, v in get_stdlib_constants().items():
+            self.globals.define(k, v)
+        for k, v in get_stdlib_functions().items():
+            self.globals.define(k, v)
+
+        self.globals.define('clock', time.time)
+        self.globals.define('len', lambda obj: len(obj) if hasattr(obj, '__len__') else 0)
+        self.globals.define('str', lambda v: "nil" if v is None else ("true" if v is True else ("false" if v is False else (str(int(v)) if isinstance(v, float) and v.is_integer() else str(v)))))
+        self.globals.define('int', lambda v: int(v) if v is not None else 0)
+        self.globals.define('float', lambda v: float(v) if v is not None else 0.0)
+        self.globals.define('append', lambda lst, val: lst.append(val))
+        self.globals.define('pop', lambda lst, *args: lst.pop(*args) if lst else None)
+        self.globals.define('keys', lambda d: list(d.keys()) if isinstance(d, dict) else [])
+        self.globals.define('values', lambda d: list(d.values()) if isinstance(d, dict) else [])
 
     def interpret(self, node: ASTNode) -> Any:
-        return self.visit(node)
+        try:
+            return self.visit(node)
+        except ThrownException as exc:
+            msg = exc.value if isinstance(exc.value, str) else f"Uncaught exception: {exc.value}"
+            raise RuntimeError(msg)
 
     def execute_block(self, statements: list, env: Environment) -> Any:
         previous = self.environment
@@ -345,6 +378,24 @@ class Interpreter(ASTVisitor):
         if hasattr(self, "debugger") and self.debugger is not None:
             return self.debugger.on_ast_debugger(node)
         return None
+
+    def visit_TryCatchNode(self, node: TryCatchNode) -> Any:
+        try:
+            return self.visit(node.try_block)
+        except ThrownException as exc:
+            catch_env = Environment(self.environment)
+            if node.catch_var:
+                catch_env.define(node.catch_var, exc.value)
+            return self.execute_block(node.catch_block.statements, catch_env)
+        except (RuntimeError, ZeroDivisionError, IndexError, KeyError, TypeError) as err:
+            catch_env = Environment(self.environment)
+            if node.catch_var:
+                catch_env.define(node.catch_var, str(err))
+            return self.execute_block(node.catch_block.statements, catch_env)
+
+    def visit_ThrowNode(self, node: ThrowNode) -> Any:
+        val = self.visit(node.expression)
+        raise ThrownException(val)
 
     def get_variables(self) -> Dict[str, Any]:
         return self.environment.variables.copy()

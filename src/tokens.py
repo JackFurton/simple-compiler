@@ -57,6 +57,9 @@ class TokenType(Enum):
     THIS = auto()
     SUPER = auto()
     DEBUGGER = auto()
+    TRY = auto()
+    CATCH = auto()
+    THROW = auto()
 
     # Special
     EOF = auto()

@@ -11,7 +11,7 @@ try:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode
+        DebuggerNode, TryCatchNode, ThrowNode
     )
 except ImportError:
     from ast_nodes import (
@@ -22,7 +22,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode
+        DebuggerNode, TryCatchNode, ThrowNode
     )
 
 
@@ -55,6 +55,8 @@ class CTranspiler(ASTVisitor):
         self.current_function: Optional[str] = None
         self.current_class: Optional[str] = None
         self.local_vars: Set[str] = set()
+        self.try_depth: int = 0
+        self.scope_depth: int = 0
 
     def indent(self) -> str:
         return "    " * self.indent_level
@@ -158,6 +160,10 @@ class CTranspiler(ASTVisitor):
         lines: List[str] = []
         lines.append(f"Value _method_{class_name}_{method.name}(Value this, int __argc, Value* __argv) {{")
         self.indent_level = 1
+        prev_fn = self.current_function
+        prev_try = self.try_depth
+        self.current_function = method.name
+        self.try_depth = 0
 
         # Bind parameters from __argv
         for idx, param in enumerate(method.params):
@@ -174,6 +180,8 @@ class CTranspiler(ASTVisitor):
         else:
             lines.append(f"{self.indent()}return val_nil();")
 
+        self.current_function = prev_fn
+        self.try_depth = prev_try
         self.indent_level = 0
         lines.append("}\n")
         return "\n".join(lines)
@@ -186,6 +194,8 @@ class CTranspiler(ASTVisitor):
         params_str = ", ".join(f"Value {self.c_ident(p)}" for p in node.params) if node.params else "void"
         lines.append(f"Value {self.c_fn_ident(node.name)}({params_str}) {{")
         self.indent_level += 1
+        prev_try = self.try_depth
+        self.try_depth = 0
 
         for stmt in node.body.statements:
             code = self.transpile_statement(stmt)
@@ -193,6 +203,7 @@ class CTranspiler(ASTVisitor):
                 lines.append(f"{self.indent()}{code}")
 
         lines.append(f"{self.indent()}return val_nil();")
+        self.try_depth = prev_try
         self.indent_level -= 1
         lines.append("}\n")
         return "\n".join(lines)
@@ -203,10 +214,12 @@ class CTranspiler(ASTVisitor):
     def visit_BlockNode(self, node: BlockNode) -> str:
         lines: List[str] = ["{"]
         self.indent_level += 1
+        self.scope_depth += 1
         for stmt in node.statements:
             code = self.transpile_statement(stmt)
             if code:
                 lines.append(f"{self.indent()}{code}")
+        self.scope_depth -= 1
         self.indent_level -= 1
         lines.append(f"{self.indent()}}}")
         return "\n".join(lines)
@@ -214,7 +227,7 @@ class CTranspiler(ASTVisitor):
     def visit_VarDeclarationNode(self, node: VarDeclarationNode) -> str:
         init_code = self.visit(node.initializer) if node.initializer else "val_nil()"
         ident = self.c_ident(node.name)
-        if self.current_function is None and self.current_class is None:
+        if self.current_function is None and self.current_class is None and self.scope_depth == 0:
             # Top-level global initialization
             return f"{ident} = {init_code};"
         return f"Value {ident} = {init_code};"
@@ -258,8 +271,15 @@ class CTranspiler(ASTVisitor):
 
     def visit_ReturnNode(self, node: ReturnNode) -> str:
         if node.value:
-            return f"return {self.visit(node.value)};"
-        return "return val_nil();"
+            val_expr = self.visit(node.value)
+        elif self.current_class is not None and self.current_function == "init":
+            val_expr = "this"
+        else:
+            val_expr = "val_nil()"
+
+        if self.try_depth > 0:
+            return f"{{ Value _ret_val = {val_expr}; _exc_top -= {self.try_depth}; return _ret_val; }}"
+        return f"return {val_expr};"
 
     def visit_PrintNode(self, node: PrintNode) -> str:
         expr_code = self.visit(node.expression)
@@ -271,6 +291,38 @@ class CTranspiler(ASTVisitor):
 
     def visit_DebuggerNode(self, node: DebuggerNode) -> str:
         return '/* debugger statement */'
+
+    def visit_TryCatchNode(self, node: TryCatchNode) -> str:
+        lines: List[str] = []
+        lines.append("if (setjmp(_exc_stack[_exc_top++].env) == 0) {")
+        self.indent_level += 1
+        self.try_depth += 1
+        self.scope_depth += 1
+        for stmt in node.try_block.statements:
+            code = self.transpile_statement(stmt)
+            if code:
+                lines.append(f"{self.indent()}{code}")
+        self.scope_depth -= 1
+        self.try_depth -= 1
+        lines.append(f"{self.indent()}_exc_top--;")
+        self.indent_level -= 1
+        lines.append(f"{self.indent()}}} else {{")
+        self.indent_level += 1
+        self.scope_depth += 1
+        if node.catch_var:
+            lines.append(f"{self.indent()}Value {self.c_ident(node.catch_var)} = _current_exception;")
+        for stmt in node.catch_block.statements:
+            code = self.transpile_statement(stmt)
+            if code:
+                lines.append(f"{self.indent()}{code}")
+        self.scope_depth -= 1
+        self.indent_level -= 1
+        lines.append(f"{self.indent()}}}")
+        return "\n".join(lines)
+
+    def visit_ThrowNode(self, node: ThrowNode) -> str:
+        expr_code = self.visit(node.expression)
+        return f"val_throw({expr_code});"
 
     def visit_NumberNode(self, node: NumberNode) -> str:
         if isinstance(node.value, int):
