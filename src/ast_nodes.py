@@ -136,8 +136,11 @@ class WhileNode(ASTNode):
     body: ASTNode
     line: int = 1
     column: int = 1
+    increment: Optional[ASTNode] = None
 
     def __str__(self):
+        if self.increment:
+            return f"While({self.condition} do {self.body} inc {self.increment})"
         return f"While({self.condition} do {self.body})"
 
 
@@ -331,6 +334,24 @@ class ThrowNode(ASTNode):
 
 
 @dataclass
+class BreakNode(ASTNode):
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        return "Break()"
+
+
+@dataclass
+class ContinueNode(ASTNode):
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        return "Continue()"
+
+
+@dataclass
 class ProgramNode(ASTNode):
     statements: List[ASTNode] = field(default_factory=list)
     line: int = 1
@@ -342,6 +363,12 @@ class ProgramNode(ASTNode):
 
 
 class ASTVisitor(ABC):
+    def visit_BreakNode(self, node: BreakNode) -> Any:
+        pass
+
+    def visit_ContinueNode(self, node: ContinueNode) -> Any:
+        pass
+
     def visit_TryCatchNode(self, node: TryCatchNode) -> Any:
         pass
 

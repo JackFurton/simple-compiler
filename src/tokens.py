@@ -16,6 +16,10 @@ class TokenType(Enum):
     DIVIDE = auto()
     MODULO = auto()
     ASSIGN = auto()
+    PLUS_ASSIGN = auto()
+    MINUS_ASSIGN = auto()
+    STAR_ASSIGN = auto()
+    SLASH_ASSIGN = auto()
 
     # Comparisons
     EQUAL = auto()
@@ -45,6 +49,9 @@ class TokenType(Enum):
     ELSE = auto()
     WHILE = auto()
     FOR = auto()
+    IN = auto()
+    BREAK = auto()
+    CONTINUE = auto()
     FN = auto()
     RETURN = auto()
     TRUE = auto()

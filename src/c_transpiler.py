@@ -11,7 +11,7 @@ try:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
     )
 except ImportError:
     from ast_nodes import (
@@ -22,7 +22,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
     )
 
 
@@ -56,6 +56,7 @@ class CTranspiler(ASTVisitor):
         self.current_class: Optional[str] = None
         self.local_vars: Set[str] = set()
         self.try_depth: int = 0
+        self.loop_try_depth: int = 0
         self.scope_depth: int = 0
 
     def indent(self) -> str:
@@ -260,14 +261,34 @@ class CTranspiler(ASTVisitor):
     def visit_WhileNode(self, node: WhileNode) -> str:
         cond_code = self.visit(node.condition)
         lines: List[str] = []
-        lines.append(f"while (val_is_truthy({cond_code})) {{")
+        if node.increment is not None:
+            inc_node = node.increment.expression if isinstance(node.increment, ExpressionStmtNode) else node.increment
+            inc_code = self.visit(inc_node).rstrip(';')
+            lines.append(f"for (; val_is_truthy({cond_code}); {inc_code}) {{")
+        else:
+            lines.append(f"while (val_is_truthy({cond_code})) {{")
         self.indent_level += 1
+        prev_loop_try = self.loop_try_depth
+        self.loop_try_depth = self.try_depth
         body_code = self.visit(node.body)
         if body_code:
             lines.append(f"{self.indent()}{body_code}")
+        self.loop_try_depth = prev_loop_try
         self.indent_level -= 1
         lines.append(f"{self.indent()}}}")
         return "\n".join(lines)
+
+    def visit_BreakNode(self, node: BreakNode) -> str:
+        diff = self.try_depth - self.loop_try_depth
+        if diff > 0:
+            return f"{{ _exc_top -= {diff}; break; }}"
+        return "break;"
+
+    def visit_ContinueNode(self, node: ContinueNode) -> str:
+        diff = self.try_depth - self.loop_try_depth
+        if diff > 0:
+            return f"{{ _exc_top -= {diff}; continue; }}"
+        return "continue;"
 
     def visit_ReturnNode(self, node: ReturnNode) -> str:
         if node.value:

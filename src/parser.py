@@ -10,7 +10,7 @@ try:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
     )
 except ImportError:
     from tokens import Token, TokenType
@@ -23,7 +23,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
     )
 
 
@@ -39,6 +39,7 @@ class Parser:
         self.lexer = lexer
         self.current_token: Token = self.lexer.get_next_token()
         self.previous_token: Optional[Token] = None
+        self._for_in_counter: int = 0
 
     def _error(self, message: str) -> None:
         raise ParseError(message, self.current_token)
@@ -168,6 +169,16 @@ class Parser:
         if self._match(TokenType.FOR):
             return self._for_statement()
 
+        if self._match(TokenType.BREAK):
+            token = self.previous_token
+            self._match(TokenType.SEMICOLON)
+            return BreakNode(line=token.line, column=token.column)
+
+        if self._match(TokenType.CONTINUE):
+            token = self.previous_token
+            self._match(TokenType.SEMICOLON)
+            return ContinueNode(line=token.line, column=token.column)
+
         if self._match(TokenType.RETURN):
             return self._return_statement()
 
@@ -254,16 +265,75 @@ class Parser:
         return WhileNode(condition, body, line=token.line, column=token.column)
 
     def _for_statement(self) -> ASTNode:
-        # Desugar: for (init; cond; inc) body -> { init; while (cond) { body; inc; } }
-        self._eat(TokenType.LPAREN, "Expected '(' after 'for'")
+        for_token = self.previous_token
+        has_paren = self._match(TokenType.LPAREN)
 
         init = None
+        for_in_var = None
+
         if self._match(TokenType.SEMICOLON):
             init = None
         elif self._match(TokenType.LET):
-            init = self._var_declaration()
+            let_token = self.previous_token
+            name_token = self._eat(TokenType.IDENTIFIER, "Expected variable name")
+            if self._match(TokenType.IN):
+                for_in_var = name_token.value
+            else:
+                initializer = None
+                if self._match(TokenType.ASSIGN):
+                    initializer = self._expression()
+                self._eat(TokenType.SEMICOLON, "Expected ';' after loop variable declaration")
+                init = VarDeclarationNode(name_token.value, initializer, line=let_token.line, column=let_token.column)
         else:
-            init = self._expression_statement()
+            expr_token = self.current_token
+            first_expr = self._expression()
+            if isinstance(first_expr, VariableNode) and self._match(TokenType.IN):
+                for_in_var = first_expr.name
+            else:
+                self._eat(TokenType.SEMICOLON, "Expected ';' after for loop initializer")
+                if isinstance(first_expr, (AssignmentNode, IndexAssignmentNode, SetPropertyNode)):
+                    init = first_expr
+                else:
+                    init = ExpressionStmtNode(first_expr, line=expr_token.line, column=expr_token.column)
+
+        if for_in_var is not None:
+            iterable_expr = self._expression()
+            if has_paren:
+                self._eat(TokenType.RPAREN, "Expected ')' after for-in iterable")
+            self._skip_newlines()
+            body = self._statement()
+
+            loop_id = self._for_in_counter
+            self._for_in_counter += 1
+            iter_name = f"__for_iter_{loop_id}"
+            idx_name = f"__for_idx_{loop_id}"
+            line = for_token.line
+            col = for_token.column
+
+            iter_decl = VarDeclarationNode(iter_name, iterable_expr, line=line, column=col)
+            idx_decl = VarDeclarationNode(idx_name, NumberNode(0, line=line, column=col), line=line, column=col)
+            cond_node = BinaryOpNode(
+                VariableNode(idx_name, line=line, column=col),
+                "<",
+                CallNode(VariableNode("len", line=line, column=col), [VariableNode(iter_name, line=line, column=col)], line=line, column=col),
+                line=line,
+                column=col
+            )
+            inc_node = AssignmentNode(
+                idx_name,
+                BinaryOpNode(VariableNode(idx_name, line=line, column=col), "+", NumberNode(1, line=line, column=col), line=line, column=col),
+                line=line,
+                column=col
+            )
+            item_decl = VarDeclarationNode(
+                for_in_var,
+                IndexNode(VariableNode(iter_name, line=line, column=col), VariableNode(idx_name, line=line, column=col), line=line, column=col),
+                line=line,
+                column=col
+            )
+            while_body = BlockNode([item_decl, body], line=line, column=col)
+            loop_node = WhileNode(cond_node, while_body, line=line, column=col, increment=inc_node)
+            return BlockNode([iter_decl, idx_decl, loop_node], line=line, column=col)
 
         condition = None
         if not self._check(TokenType.SEMICOLON):
@@ -272,22 +342,22 @@ class Parser:
 
         increment = None
         if not self._check(TokenType.RPAREN):
-            increment = self._expression()
-        self._eat(TokenType.RPAREN, "Expected ')' after for clauses")
+            inc_expr = self._expression()
+            if isinstance(inc_expr, (AssignmentNode, IndexAssignmentNode, SetPropertyNode)):
+                increment = inc_expr
+            else:
+                increment = ExpressionStmtNode(inc_expr, line=for_token.line, column=for_token.column)
+        if has_paren:
+            self._eat(TokenType.RPAREN, "Expected ')' after for clauses")
 
         self._skip_newlines()
         body = self._statement()
 
-        # Build while body
-        while_body_stmts = [body]
-        if increment is not None:
-            while_body_stmts.append(ExpressionStmtNode(increment))
-
-        cond_node = condition if condition is not None else BooleanNode(True)
-        loop_node = WhileNode(cond_node, BlockNode(while_body_stmts))
+        cond_node = condition if condition is not None else BooleanNode(True, line=for_token.line, column=for_token.column)
+        loop_node = WhileNode(cond_node, BlockNode([body], line=for_token.line, column=for_token.column), line=for_token.line, column=for_token.column, increment=increment)
 
         if init is not None:
-            return BlockNode([init, loop_node])
+            return BlockNode([init, loop_node], line=for_token.line, column=for_token.column)
         return loop_node
 
     def _return_statement(self) -> ReturnNode:
@@ -330,18 +400,34 @@ class Parser:
     def _assignment(self) -> ASTNode:
         expr = self._logical_or()
 
-        if self._match(TokenType.ASSIGN):
-            equals_token = self.previous_token
+        if self._match(
+            TokenType.ASSIGN,
+            TokenType.PLUS_ASSIGN,
+            TokenType.MINUS_ASSIGN,
+            TokenType.STAR_ASSIGN,
+            TokenType.SLASH_ASSIGN
+        ):
+            op_token = self.previous_token
             value = self._assignment()
 
-            if isinstance(expr, VariableNode):
-                return AssignmentNode(expr.name, value, line=equals_token.line, column=equals_token.column)
-            elif isinstance(expr, IndexNode):
-                return IndexAssignmentNode(expr.target, expr.index, value, line=equals_token.line, column=equals_token.column)
-            elif isinstance(expr, GetPropertyNode):
-                return SetPropertyNode(expr.target, expr.property_name, value, line=equals_token.line, column=equals_token.column)
+            compound_op_map = {
+                TokenType.PLUS_ASSIGN: '+',
+                TokenType.MINUS_ASSIGN: '-',
+                TokenType.STAR_ASSIGN: '*',
+                TokenType.SLASH_ASSIGN: '/',
+            }
+            if op_token.type in compound_op_map:
+                bin_op = compound_op_map[op_token.type]
+                value = BinaryOpNode(expr, bin_op, value, line=op_token.line, column=op_token.column)
 
-            raise ParseError("Invalid assignment target", equals_token)
+            if isinstance(expr, VariableNode):
+                return AssignmentNode(expr.name, value, line=op_token.line, column=op_token.column)
+            elif isinstance(expr, IndexNode):
+                return IndexAssignmentNode(expr.target, expr.index, value, line=op_token.line, column=op_token.column)
+            elif isinstance(expr, GetPropertyNode):
+                return SetPropertyNode(expr.target, expr.property_name, value, line=op_token.line, column=op_token.column)
+
+            raise ParseError("Invalid assignment target", op_token)
 
         return expr
 

@@ -314,6 +314,8 @@ class ASTAnalyzer:
                 self._analyze_node(node.else_branch, depth + 1)
             if hasattr(node, 'body'):
                 self._analyze_node(node.body, depth + 1)
+            if getattr(node, 'increment', None):
+                self._analyze_node(node.increment, depth + 1)
 
         elif hasattr(node, 'elements'):
             for elem in node.elements:

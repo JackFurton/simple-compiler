@@ -12,7 +12,7 @@ try:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
     )
     from .opcodes import OpCode
     from .chunk import Chunk, FunctionObject
@@ -26,7 +26,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
     )
     from opcodes import OpCode
     from chunk import Chunk, FunctionObject
@@ -50,6 +50,15 @@ class Local:
     name: str
     depth: int  # -1 if uninitialized, >= 0 initialized
     is_captured: bool = False
+
+
+@dataclass
+class LoopContext:
+    loop_start: int
+    scope_depth: int
+    try_depth: int
+    break_jumps: List[int]
+    continue_jumps: List[int]
 
 
 class CompileError(Exception):
@@ -76,6 +85,7 @@ class BytecodeCompiler(ASTVisitor):
         self.upvalues: List[CompilerUpvalue] = []
         self.scope_depth: int = 0
         self.try_depth: int = 0
+        self.loop_stack: List[LoopContext] = []
 
         # Slot 0 in call frame is reserved for function/closure, or "this" in methods
         slot0_name = "this" if fn_type in (FunctionType.TYPE_METHOD, FunctionType.TYPE_INITIALIZER) else ""
@@ -320,6 +330,17 @@ class BytecodeCompiler(ASTVisitor):
             self.patch_jump(then_jump)
             self.emit_opcode(OpCode.OP_POP, node.line)  # Pop condition if falsy
 
+    def _emit_loop_cleanup(self, loop_ctx: LoopContext, line: int) -> None:
+        for _ in range(self.try_depth - loop_ctx.try_depth):
+            self.emit_opcode(OpCode.OP_POP_HANDLER, line)
+        for i in range(len(self.locals) - 1, -1, -1):
+            if self.locals[i].depth <= loop_ctx.scope_depth:
+                break
+            if self.locals[i].is_captured:
+                self.emit_opcode(OpCode.OP_CLOSE_UPVALUE, line)
+            else:
+                self.emit_opcode(OpCode.OP_POP, line)
+
     def visit_WhileNode(self, node: WhileNode) -> None:
         loop_start = len(self.chunk.code)
 
@@ -327,11 +348,48 @@ class BytecodeCompiler(ASTVisitor):
         exit_jump = self.emit_jump(OpCode.OP_JUMP_IF_FALSE, node.line)
         self.emit_opcode(OpCode.OP_POP, node.line)
 
+        loop_ctx = LoopContext(
+            loop_start=loop_start,
+            scope_depth=self.scope_depth,
+            try_depth=self.try_depth,
+            break_jumps=[],
+            continue_jumps=[]
+        )
+        self.loop_stack.append(loop_ctx)
+
         self.compile_statement(node.body)
+
+        self.loop_stack.pop()
+
+        for jmp in loop_ctx.continue_jumps:
+            self.patch_jump(jmp)
+
+        if node.increment is not None:
+            self.compile_statement(node.increment)
+
         self.emit_loop(loop_start, node.line)
 
         self.patch_jump(exit_jump)
         self.emit_opcode(OpCode.OP_POP, node.line)
+
+        for jmp in loop_ctx.break_jumps:
+            self.patch_jump(jmp)
+
+    def visit_BreakNode(self, node: BreakNode) -> None:
+        if not self.loop_stack:
+            raise CompileError("Cannot use 'break' outside of a loop", node.line, node.column)
+        loop_ctx = self.loop_stack[-1]
+        self._emit_loop_cleanup(loop_ctx, node.line)
+        jmp = self.emit_jump(OpCode.OP_JUMP, node.line)
+        loop_ctx.break_jumps.append(jmp)
+
+    def visit_ContinueNode(self, node: ContinueNode) -> None:
+        if not self.loop_stack:
+            raise CompileError("Cannot use 'continue' outside of a loop", node.line, node.column)
+        loop_ctx = self.loop_stack[-1]
+        self._emit_loop_cleanup(loop_ctx, node.line)
+        jmp = self.emit_jump(OpCode.OP_JUMP, node.line)
+        loop_ctx.continue_jumps.append(jmp)
 
     def visit_BinaryOpNode(self, node: BinaryOpNode) -> None:
         # Logical short-circuiting operators

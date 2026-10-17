@@ -20,6 +20,14 @@ class ThrownException(Exception):
         super().__init__(str(value))
 
 
+class BreakException(Exception):
+    pass
+
+
+class ContinueException(Exception):
+    pass
+
+
 class Environment:
     def __init__(self, parent: Optional['Environment'] = None):
         self.parent = parent
@@ -238,8 +246,21 @@ class Interpreter(ASTVisitor):
     def visit_WhileNode(self, node: WhileNode) -> Any:
         result = None
         while bool(self.visit(node.condition)):
-            result = self.visit(node.body)
+            try:
+                result = self.visit(node.body)
+            except ContinueException:
+                pass
+            except BreakException:
+                break
+            if node.increment is not None:
+                self.visit(node.increment)
         return result
+
+    def visit_BreakNode(self, node: BreakNode) -> Any:
+        raise BreakException()
+
+    def visit_ContinueNode(self, node: ContinueNode) -> Any:
+        raise ContinueException()
 
     def visit_FunctionDefNode(self, node: FunctionDefNode) -> Any:
         fn = UserFunction(node, self.environment)
