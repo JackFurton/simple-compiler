@@ -67,6 +67,7 @@ class TokenType(Enum):
     TRY = auto()
     CATCH = auto()
     THROW = auto()
+    IMPORT = auto()
 
     # Special
     EOF = auto()

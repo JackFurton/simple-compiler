@@ -1,6 +1,7 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 from dataclasses import dataclass
 from enum import Enum, auto
+from pathlib import Path
 
 try:
     from .tokens import Token, TokenType
@@ -12,10 +13,12 @@ try:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode,
+        ImportNode
     )
     from .opcodes import OpCode
     from .chunk import Chunk, FunctionObject
+    from .parser import load_module_ast
 except ImportError:
     from tokens import Token, TokenType
     from ast_nodes import (
@@ -26,10 +29,12 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode,
+        ImportNode
     )
     from opcodes import OpCode
     from chunk import Chunk, FunctionObject
+    from parser import load_module_ast
 
 
 class FunctionType(Enum):
@@ -75,11 +80,14 @@ class BytecodeCompiler(ASTVisitor):
         fn_type: FunctionType = FunctionType.TYPE_SCRIPT,
         name: str = "",
         enclosing: Optional['BytecodeCompiler'] = None,
-        current_class: Optional[str] = None
+        current_class: Optional[str] = None,
+        base_dir: Optional[str] = None
     ):
         self.type = fn_type
         self.enclosing = enclosing
         self.current_class = current_class or (enclosing.current_class if enclosing else None)
+        self.base_dir = base_dir or (enclosing.base_dir if enclosing else None)
+        self.imported_modules: Set[str] = enclosing.imported_modules if enclosing else set()
         self.function = FunctionObject(name=name, arity=0)
         self.locals: List[Local] = []
         self.upvalues: List[CompilerUpvalue] = []
@@ -693,3 +701,21 @@ class BytecodeCompiler(ASTVisitor):
     def visit_ThrowNode(self, node: ThrowNode) -> None:
         self.visit(node.expression)
         self.emit_opcode(OpCode.OP_THROW, node.line)
+
+    def visit_ImportNode(self, node: ImportNode) -> None:
+        try:
+            canonical_path, mod_ast = load_module_ast(node.path, self.base_dir)
+        except Exception as e:
+            raise CompileError(str(e), node.line, node.column)
+
+        if canonical_path in self.imported_modules:
+            return
+        self.imported_modules.add(canonical_path)
+
+        prev_base = self.base_dir
+        self.base_dir = str(Path(canonical_path).parent)
+        try:
+            for stmt in mod_ast.statements:
+                self.compile_statement(stmt)
+        finally:
+            self.base_dir = prev_base

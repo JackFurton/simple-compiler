@@ -20,6 +20,7 @@ tests = [
     "test_exceptions.py",
     "test_loops_and_ergonomics.py",
     "test_lambdas.py",
+    "test_imports_and_interpolation.py",
     "test_basic.py",
 ]
 

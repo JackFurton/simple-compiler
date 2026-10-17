@@ -364,6 +364,16 @@ class ContinueNode(ASTNode):
 
 
 @dataclass
+class ImportNode(ASTNode):
+    path: str
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        return f'Import("{self.path}")'
+
+
+@dataclass
 class ProgramNode(ASTNode):
     statements: List[ASTNode] = field(default_factory=list)
     line: int = 1
@@ -375,6 +385,9 @@ class ProgramNode(ASTNode):
 
 
 class ASTVisitor(ABC):
+    def visit_ImportNode(self, node: ImportNode) -> Any:
+        pass
+
     def visit_LambdaNode(self, node: LambdaNode) -> Any:
         pass
 

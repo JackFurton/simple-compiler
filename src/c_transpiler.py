@@ -11,8 +11,10 @@ try:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode,
+        ImportNode
     )
+    from .parser import load_module_ast
 except ImportError:
     from ast_nodes import (
         ASTNode, NumberNode, StringNode, BooleanNode, NilNode,
@@ -22,8 +24,10 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode,
+        ImportNode
     )
+    from parser import load_module_ast
 
 
 def escape_c_string(s: str) -> str:
@@ -45,8 +49,10 @@ def escape_c_string(s: str) -> str:
 
 
 class CTranspiler(ASTVisitor):
-    def __init__(self, include_runtime: bool = True):
+    def __init__(self, include_runtime: bool = True, base_dir: Optional[str] = None):
         self.include_runtime = include_runtime
+        self.base_dir = base_dir
+        self.imported_modules: Set[str] = set()
         self.indent_level = 0
 
         self.global_vars: Set[str] = set()
@@ -61,6 +67,24 @@ class CTranspiler(ASTVisitor):
         self.lambda_counter: int = 0
         self.lambda_decls: List[str] = []
         self.lambda_defs: List[str] = []
+
+    def _expand_imports(self, statements: List[ASTNode]) -> List[ASTNode]:
+        expanded: List[ASTNode] = []
+        for stmt in statements:
+            if isinstance(stmt, ImportNode):
+                canonical_path, mod_ast = load_module_ast(stmt.path, self.base_dir)
+                if canonical_path in self.imported_modules:
+                    continue
+                self.imported_modules.add(canonical_path)
+                prev_base = self.base_dir
+                self.base_dir = str(Path(canonical_path).parent)
+                try:
+                    expanded.extend(self._expand_imports(mod_ast.statements))
+                finally:
+                    self.base_dir = prev_base
+            else:
+                expanded.append(stmt)
+        return expanded
 
     def indent(self) -> str:
         return "    " * self.indent_level
@@ -80,8 +104,10 @@ class CTranspiler(ASTVisitor):
         return code
 
     def transpile(self, node: ProgramNode) -> str:
+        all_statements = self._expand_imports(node.statements)
+
         # Pre-scan for classes, functions, and top-level variables
-        for stmt in node.statements:
+        for stmt in all_statements:
             if isinstance(stmt, ClassDefNode):
                 self.classes[stmt.name] = stmt
             elif isinstance(stmt, FunctionDefNode):
@@ -118,7 +144,7 @@ class CTranspiler(ASTVisitor):
         main_lines.append("")
 
         # Top-level statements
-        for stmt in node.statements:
+        for stmt in all_statements:
             if not isinstance(stmt, (ClassDefNode, FunctionDefNode)):
                 code = self.transpile_statement(stmt)
                 if code:

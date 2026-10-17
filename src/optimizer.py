@@ -8,7 +8,7 @@ try:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, LambdaNode
+        DebuggerNode, TryCatchNode, ThrowNode, LambdaNode, ImportNode
     )
 except ImportError:
     from ast_nodes import (
@@ -19,7 +19,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, LambdaNode
+        DebuggerNode, TryCatchNode, ThrowNode, LambdaNode, ImportNode
     )
 
 
