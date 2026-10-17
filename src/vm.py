@@ -100,9 +100,69 @@ class VM:
             'pop': lambda lst, *args: lst.pop(*args) if lst else None,
             'keys': lambda d: list(d.keys()) if isinstance(d, dict) else [],
             'values': lambda d: list(d.values()) if isinstance(d, dict) else [],
+            'map': self._builtin_map,
+            'filter': self._builtin_filter,
+            'reduce': self._builtin_reduce,
         }
         builtins.update(get_stdlib_functions())
         return builtins
+
+    def _invoke_callable(self, callee: Any, *args) -> Any:
+        if isinstance(callee, (ClosureObject, FunctionObject, BoundMethod, ClassObject)):
+            target_frames = len(self.frames)
+            self.push(callee)
+            for arg in args:
+                self.push(arg)
+            self.call_value(callee, len(args))
+            if len(self.frames) > target_frames:
+                return self.run(min_frames=target_frames)
+            return self.pop()
+        if callable(callee):
+            try:
+                return callee(*args)
+            except (VMError, _VMUnwind):
+                raise
+            except Exception as e:
+                self.runtime_error(f"Error in native call: {e}")
+        self.runtime_error(f"Can only call functions, got {type(callee).__name__}")
+
+    def _builtin_map(self, arg1: Any, arg2: Any) -> list:
+        if isinstance(arg1, (list, str)) and not isinstance(arg2, (list, str)):
+            iterable, fn = arg1, arg2
+        else:
+            fn, iterable = arg1, arg2
+        if not isinstance(iterable, (list, str)):
+            self.runtime_error("map() expects a list or string")
+        return [self._invoke_callable(fn, item) for item in iterable]
+
+    def _builtin_filter(self, arg1: Any, arg2: Any) -> list:
+        if isinstance(arg1, (list, str)) and not isinstance(arg2, (list, str)):
+            iterable, fn = arg1, arg2
+        else:
+            fn, iterable = arg1, arg2
+        if not isinstance(iterable, (list, str)):
+            self.runtime_error("filter() expects a list or string")
+        return [item for item in iterable if self.is_truthy(self._invoke_callable(fn, item))]
+
+    def _builtin_reduce(self, arg1: Any, arg2: Any, *rest) -> Any:
+        if isinstance(arg1, (list, str)) and not isinstance(arg2, (list, str)):
+            iterable, fn = arg1, arg2
+        else:
+            fn, iterable = arg1, arg2
+        if not isinstance(iterable, (list, str)):
+            self.runtime_error("reduce() expects a list or string")
+        items = list(iterable)
+        if rest:
+            acc = rest[0]
+            start_idx = 0
+        else:
+            if not items:
+                self.runtime_error("reduce() of empty sequence with no initial value")
+            acc = items[0]
+            start_idx = 1
+        for i in range(start_idx, len(items)):
+            acc = self._invoke_callable(fn, acc, items[i])
+        return acc
 
     def _builtin_type(self, val: Any) -> str:
         if val is None:
@@ -250,6 +310,8 @@ class VM:
             self.pop()  # Pop the callee function itself
             try:
                 result = callee(*args)
+            except (VMError, _VMUnwind):
+                raise
             except Exception as e:
                 self.runtime_error(f"Error in native call: {e}")
             self.push(result)
@@ -271,8 +333,8 @@ class VM:
         self.frames.append(root_frame)
         return self.run()
 
-    def run(self) -> Any:
-        while self.frames:
+    def run(self, min_frames: int = 0) -> Any:
+        while len(self.frames) > min_frames:
             frame = self.frames[-1]
             if frame.ip >= len(frame.function.chunk.code):
                 self.frames.pop()
@@ -599,12 +661,15 @@ class VM:
                     prev_frame = self.frames.pop()
                     while self.handlers and self.handlers[-1].frame_index >= len(self.frames):
                         self.handlers.pop()
-                    if not self.frames:
+                    if not self.frames or len(self.frames) <= min_frames:
+                        self.stack = self.stack[:prev_frame.slots]
                         return result
                     # Reset stack to the base of the returning function frame
                     self.stack = self.stack[:prev_frame.slots]
                     self.push(result)
             except _VMUnwind:
+                if len(self.frames) <= min_frames:
+                    raise
                 continue
 
         return None

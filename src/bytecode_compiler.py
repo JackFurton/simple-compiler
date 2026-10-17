@@ -12,7 +12,7 @@ try:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode
     )
     from .opcodes import OpCode
     from .chunk import Chunk, FunctionObject
@@ -26,7 +26,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode
     )
     from opcodes import OpCode
     from chunk import Chunk, FunctionObject
@@ -492,6 +492,33 @@ class BytecodeCompiler(ASTVisitor):
             name_idx = self.chunk.add_constant(node.name)
             self.emit_opcode(OpCode.OP_DEFINE_GLOBAL, node.line)
             self.emit_u16(name_idx, node.line)
+
+    def visit_LambdaNode(self, node: LambdaNode) -> None:
+        fn_compiler = BytecodeCompiler(
+            fn_type=FunctionType.TYPE_FUNCTION,
+            name="<lambda>",
+            enclosing=self
+        )
+        fn_compiler.function.arity = len(node.params)
+
+        for param in node.params:
+            fn_compiler.add_local(param, node.line)
+            fn_compiler.mark_initialized()
+
+        for stmt in node.body.statements:
+            fn_compiler.compile_statement(stmt)
+
+        fn_compiler.emit_return(node.line)
+
+        compiled_fn = fn_compiler.function
+        compiled_fn.upvalue_count = len(fn_compiler.upvalues)
+        const_idx = self.chunk.add_constant(compiled_fn)
+        self.emit_opcode(OpCode.OP_CLOSURE, node.line)
+        self.emit_u16(const_idx, node.line)
+
+        for u in fn_compiler.upvalues:
+            self.emit_byte(1 if u.is_local else 0, node.line)
+            self.emit_u16(u.index, node.line)
 
     def visit_CallNode(self, node: CallNode) -> None:
         self.visit(node.callee)

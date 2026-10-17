@@ -75,11 +75,9 @@ print counter(); // 12
 
 let list = [1, 2, 3];
 append(list, 4);
-let total = 0;
-for (x in list) {
-    total += x;
-}
-print total; // 10
+let squares = map(fn(x) { return x * x; }, list);
+let total = reduce(fn(a, b) { return a + b; }, squares, 0);
+print total; // 30
 
 // Exception Handling
 try {

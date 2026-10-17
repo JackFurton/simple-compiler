@@ -10,7 +10,8 @@ try:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode,
+        LambdaNode
     )
 except ImportError:
     from tokens import Token, TokenType
@@ -23,7 +24,8 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode,
+        LambdaNode
     )
 
 
@@ -92,8 +94,15 @@ class Parser:
         if self._match(TokenType.CLASS):
             return self._class_declaration()
 
-        if self._match(TokenType.FN):
-            return self._function_declaration()
+        if self._check(TokenType.FN):
+            self._advance()
+            if self._check(TokenType.IDENTIFIER):
+                return self._function_declaration()
+            # Anonymous function at start of statement (e.g., fn(x) { ... }(10))
+            lambda_node = self._lambda_expression()
+            expr = self._call_from(lambda_node)
+            self._match(TokenType.SEMICOLON)
+            return ExpressionStmtNode(expr, line=lambda_node.line, column=lambda_node.column)
 
         if self._match(TokenType.LET):
             return self._var_declaration()
@@ -504,7 +513,9 @@ class Parser:
 
     def _call(self) -> ASTNode:
         expr = self._primary()
+        return self._call_from(expr)
 
+    def _call_from(self, expr: ASTNode) -> ASTNode:
         while True:
             if self._match(TokenType.LPAREN):
                 expr = self._finish_call(expr)
@@ -526,16 +537,50 @@ class Parser:
         args: List[ASTNode] = []
         token = self.previous_token
 
+        self._skip_newlines()
         if not self._check(TokenType.RPAREN):
             args.append(self._expression())
+            self._skip_newlines()
             while self._match(TokenType.COMMA):
+                self._skip_newlines()
                 args.append(self._expression())
+                self._skip_newlines()
 
         self._eat(TokenType.RPAREN, "Expected ')' after function arguments")
         return CallNode(callee, args, line=token.line, column=token.column)
 
+    def _lambda_expression(self) -> LambdaNode:
+        token = self.previous_token
+        self._eat(TokenType.LPAREN, "Expected '(' after 'fn' in anonymous function")
+        params: List[str] = []
+        if not self._check(TokenType.RPAREN):
+            param_token = self._eat(TokenType.IDENTIFIER, "Expected parameter name")
+            params.append(param_token.value)
+            while self._match(TokenType.COMMA):
+                param_token = self._eat(TokenType.IDENTIFIER, "Expected parameter name")
+                params.append(param_token.value)
+
+        self._eat(TokenType.RPAREN, "Expected ')' after parameters")
+        self._skip_newlines()
+        self._eat(TokenType.LBRACE, "Expected '{' before function body")
+
+        block_token = self.previous_token
+        statements: List[ASTNode] = []
+        self._skip_newlines()
+        while not self._check(TokenType.RBRACE) and not self._check(TokenType.EOF):
+            stmt = self._declaration()
+            if stmt is not None:
+                statements.append(stmt)
+            self._skip_newlines()
+        self._eat(TokenType.RBRACE, "Expected '}' after function body")
+        body = BlockNode(statements, line=block_token.line, column=block_token.column)
+        return LambdaNode(params, body, line=token.line, column=token.column)
+
     def _primary(self) -> ASTNode:
         token = self.current_token
+
+        if self._match(TokenType.FN):
+            return self._lambda_expression()
 
         if self._match(TokenType.THIS):
             this_token = self.previous_token

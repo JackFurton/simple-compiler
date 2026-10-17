@@ -286,6 +286,11 @@ class ASTAnalyzer:
                 self.variables_defined.add(p)
             self._analyze_node(node.body, depth + 1)
 
+        elif hasattr(node, 'params') and hasattr(node, 'body'):
+            for p in node.params:
+                self.variables_defined.add(p)
+            self._analyze_node(node.body, depth + 1)
+
         elif hasattr(node, 'name') and not hasattr(node, 'statements'):
             self.variables_used.add(node.name)
 

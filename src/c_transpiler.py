@@ -11,7 +11,7 @@ try:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode
     )
 except ImportError:
     from ast_nodes import (
@@ -22,7 +22,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode
+        DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode, LambdaNode
     )
 
 
@@ -58,6 +58,9 @@ class CTranspiler(ASTVisitor):
         self.try_depth: int = 0
         self.loop_try_depth: int = 0
         self.scope_depth: int = 0
+        self.lambda_counter: int = 0
+        self.lambda_decls: List[str] = []
+        self.lambda_defs: List[str] = []
 
     def indent(self) -> str:
         return "    " * self.indent_level
@@ -88,6 +91,43 @@ class CTranspiler(ASTVisitor):
             elif isinstance(stmt, AssignmentNode):
                 self.global_vars.add(stmt.variable)
 
+        method_impls: List[str] = []
+        for cname, cnode in self.classes.items():
+            self.current_class = cname
+            for method in cnode.methods:
+                method_impls.append(self.transpile_method(cname, method))
+            self.current_class = None
+
+        fn_impls: List[str] = []
+        for fname, fnode in self.functions.items():
+            self.current_function = fname
+            fn_impls.append(self.visit_FunctionDefNode(fnode))
+            self.current_function = None
+
+        main_lines: List[str] = []
+        main_lines.append("int main(int argc, char** argv) {")
+        self.indent_level = 1
+
+        # Class registration
+        for cname, cnode in self.classes.items():
+            super_expr = f"class_{cnode.superclass}" if cnode.superclass else "NULL"
+            main_lines.append(f"{self.indent()}class_{cname} = val_make_class(\"{cname}\", {super_expr}).as.klass;")
+            for method in cnode.methods:
+                main_lines.append(f"{self.indent()}val_class_add_method(class_{cname}, \"{method.name}\", _method_{cname}_{method.name});")
+
+        main_lines.append("")
+
+        # Top-level statements
+        for stmt in node.statements:
+            if not isinstance(stmt, (ClassDefNode, FunctionDefNode)):
+                code = self.transpile_statement(stmt)
+                if code:
+                    main_lines.append(f"{self.indent()}{code}")
+
+        main_lines.append(f"{self.indent()}return 0;")
+        self.indent_level = 0
+        main_lines.append("}\n")
+
         lines: List[str] = []
 
         # 1. Header inclusion or embedded runtime
@@ -113,47 +153,27 @@ class CTranspiler(ASTVisitor):
         for fname, fnode in self.functions.items():
             params_str = ", ".join(f"Value {self.c_ident(p)}" for p in fnode.params) if fnode.params else "void"
             lines.append(f"Value {self.c_fn_ident(fname)}({params_str});")
+            lines.append(f"Value _fnwrap_{fname}(int __argc, Value* __argv);")
+
+        for ldecl in self.lambda_decls:
+            lines.append(ldecl)
 
         for cname, cnode in self.classes.items():
             for method in cnode.methods:
                 lines.append(f"Value _method_{cname}_{method.name}(Value this, int __argc, Value* __argv);")
 
+        if self.lambda_defs:
+            lines.append("\n/* Lambda implementations */")
+            lines.extend(self.lambda_defs)
+
         lines.append("\n/* Class method implementations */")
-        for cname, cnode in self.classes.items():
-            self.current_class = cname
-            for method in cnode.methods:
-                lines.append(self.transpile_method(cname, method))
-            self.current_class = None
+        lines.extend(method_impls)
 
         lines.append("\n/* Function implementations */")
-        for fname, fnode in self.functions.items():
-            self.current_function = fname
-            lines.append(self.visit_FunctionDefNode(fnode))
-            self.current_function = None
+        lines.extend(fn_impls)
 
         lines.append("\n/* Main entrypoint */")
-        lines.append("int main(int argc, char** argv) {")
-        self.indent_level = 1
-
-        # Class registration
-        for cname, cnode in self.classes.items():
-            super_expr = f"class_{cnode.superclass}" if cnode.superclass else "NULL"
-            lines.append(f"{self.indent()}class_{cname} = val_make_class(\"{cname}\", {super_expr}).as.klass;")
-            for method in cnode.methods:
-                lines.append(f"{self.indent()}val_class_add_method(class_{cname}, \"{method.name}\", _method_{cname}_{method.name});")
-
-        lines.append("")
-
-        # Top-level statements
-        for stmt in node.statements:
-            if not isinstance(stmt, (ClassDefNode, FunctionDefNode)):
-                code = self.transpile_statement(stmt)
-                if code:
-                    lines.append(f"{self.indent()}{code}")
-
-        lines.append(f"{self.indent()}return 0;")
-        self.indent_level = 0
-        lines.append("}\n")
+        lines.extend(main_lines)
 
         return "\n".join(lines)
 
@@ -206,8 +226,47 @@ class CTranspiler(ASTVisitor):
         lines.append(f"{self.indent()}return val_nil();")
         self.try_depth = prev_try
         self.indent_level -= 1
+        lines.append("}")
+
+        wrap_args = ", ".join(f"({idx} < __argc) ? __argv[{idx}] : val_nil()" for idx in range(len(node.params)))
+        lines.append(f"Value _fnwrap_{node.name}(int __argc, Value* __argv) {{")
+        lines.append(f"    return {self.c_fn_ident(node.name)}({wrap_args});")
         lines.append("}\n")
         return "\n".join(lines)
+
+    def visit_LambdaNode(self, node: LambdaNode) -> str:
+        self.lambda_counter += 1
+        lname = f"_lambda_{self.lambda_counter}"
+        self.lambda_decls.append(f"Value {lname}(int __argc, Value* __argv);")
+
+        prev_indent = self.indent_level
+        prev_fn = self.current_function
+        prev_try = self.try_depth
+        prev_scope = self.scope_depth
+        self.indent_level = 1
+        self.current_function = lname
+        self.try_depth = 0
+        self.scope_depth = 0
+
+        lines: List[str] = [f"Value {lname}(int __argc, Value* __argv) {{"]
+        for idx, param in enumerate(node.params):
+            lines.append(f"{self.indent()}Value {self.c_ident(param)} = ({idx} < __argc) ? __argv[{idx}] : val_nil();")
+
+        for stmt in node.body.statements:
+            code = self.transpile_statement(stmt)
+            if code:
+                lines.append(f"{self.indent()}{code}")
+
+        lines.append(f"{self.indent()}return val_nil();")
+        lines.append("}\n")
+
+        self.indent_level = prev_indent
+        self.current_function = prev_fn
+        self.try_depth = prev_try
+        self.scope_depth = prev_scope
+
+        self.lambda_defs.append("\n".join(lines))
+        return f"val_function({lname})"
 
     def visit_ClassDefNode(self, node: ClassDefNode) -> str:
         return ""
@@ -360,6 +419,8 @@ class CTranspiler(ASTVisitor):
         return "val_nil()"
 
     def visit_VariableNode(self, node: VariableNode) -> str:
+        if node.name in self.functions and node.name not in self.global_vars and node.name not in self.local_vars:
+            return f"val_function(_fnwrap_{node.name})"
         return self.c_ident(node.name)
 
     def visit_ThisNode(self, node: ThisNode) -> str:
@@ -518,9 +579,18 @@ class CTranspiler(ASTVisitor):
                 return f"val_write_file({args_code[0]}, {args_code[1]})"
             elif name == "remove_file" and len(args_code) == 1:
                 return f"val_remove_file({args_code[0]})"
-            elif name in self.functions:
+            elif name == "map" and len(args_code) == 2:
+                return f"val_map({args_code[0]}, {args_code[1]})"
+            elif name == "filter" and len(args_code) == 2:
+                return f"val_filter({args_code[0]}, {args_code[1]})"
+            elif name == "reduce" and len(args_code) == 2:
+                return f"val_reduce({args_code[0]}, {args_code[1]}, false, val_nil())"
+            elif name == "reduce" and len(args_code) == 3:
+                return f"val_reduce({args_code[0]}, {args_code[1]}, true, {args_code[2]})"
+            elif name in self.functions and name not in self.global_vars and name not in self.local_vars:
                 return f"{self.c_fn_ident(name)}({', '.join(args_code)})"
 
-        # 5. User-defined function call
+        # 5. Dynamic / first-class function or lambda call
         callee_code = self.visit(node.callee)
-        return f"{callee_code}({', '.join(args_code)})"
+        args_arr = f"(Value[]){{ {', '.join(args_code)} }}" if args_code else "NULL"
+        return f"val_call({callee_code}, {len(args_code)}, {args_arr})"
