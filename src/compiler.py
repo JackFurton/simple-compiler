@@ -53,13 +53,13 @@ class Compiler:
         except Exception as e:
             raise CompilerError(f"Parsing failed: {e}")
 
-    def compile(self, source: str, optimize: bool = True) -> FunctionObject:
+    def compile(self, source: str, optimize: bool = True, base_dir: Optional[str] = None) -> FunctionObject:
         ast = self.parse(source)
         if optimize:
             optimizer = ASTOptimizer()
             ast = optimizer.optimize(ast)
         try:
-            bc_compiler = BytecodeCompiler()
+            bc_compiler = BytecodeCompiler(base_dir=base_dir)
             return bc_compiler.visit(ast)
         except Exception as e:
             raise CompilerError(f"Compilation failed: {e}")
@@ -74,8 +74,8 @@ class Compiler:
         except Exception as e:
             raise CompilerError(f"Execution failed: {e}")
 
-    def run(self, source: str, optimize: bool = True) -> Any:
-        fn = self.compile(source, optimize=optimize)
+    def run(self, source: str, optimize: bool = True, base_dir: Optional[str] = None) -> Any:
+        fn = self.compile(source, optimize=optimize, base_dir=base_dir)
         try:
             return self.vm.interpret(fn)
         except Exception as e:
@@ -86,7 +86,8 @@ class Compiler:
             with open(source_filename, 'r', encoding='utf-8') as f:
                 source = f.read()
 
-            fn = self.compile(source, optimize=optimize)
+            base_dir = str(Path(source_filename).resolve().parent)
+            fn = self.compile(source, optimize=optimize, base_dir=base_dir)
             binary_data = serialize_bytecode(fn)
 
             if output_filename is None:
@@ -120,7 +121,8 @@ class Compiler:
         try:
             with open(filename, 'r', encoding='utf-8') as f:
                 source = f.read()
-            return self.run(source)
+            base_dir = str(Path(filename).resolve().parent)
+            return self.run(source, base_dir=base_dir)
         except FileNotFoundError:
             raise CompilerError(f"File not found: {filename}")
         except IOError as e:
@@ -142,13 +144,14 @@ class Compiler:
 
         debugger = Debugger(self.vm, source=source, filename=filename, pause_at_start=True)
         self.vm.debugger = debugger
-        fn = self.compile(source, optimize=optimize)
+        base_dir = str(Path(filename).resolve().parent)
+        fn = self.compile(source, optimize=optimize, base_dir=base_dir)
         try:
             return self.vm.interpret(fn)
         except Exception as e:
             raise CompilerError(f"Execution failed: {e}")
 
-    def transpile_to_c(self, source: str, optimize: bool = True) -> str:
+    def transpile_to_c(self, source: str, optimize: bool = True, base_dir: Optional[str] = None) -> str:
         ast = self.parse(source)
         if optimize:
             optimizer = ASTOptimizer()
@@ -157,7 +160,7 @@ class Compiler:
             from .c_transpiler import CTranspiler
         except ImportError:
             from c_transpiler import CTranspiler
-        transpiler = CTranspiler(include_runtime=True)
+        transpiler = CTranspiler(include_runtime=True, base_dir=base_dir)
         return transpiler.transpile(ast)
 
     def emit_c_file(self, source_filename: str, output_c_filename: Optional[str] = None, optimize: bool = True) -> str:
@@ -169,7 +172,8 @@ class Compiler:
         except IOError as e:
             raise CompilerError(f"Error reading file {source_filename}: {e}")
 
-        c_code = self.transpile_to_c(source, optimize=optimize)
+        base_dir = str(Path(source_filename).resolve().parent)
+        c_code = self.transpile_to_c(source, optimize=optimize, base_dir=base_dir)
         if output_c_filename is None:
             p = Path(source_filename)
             output_c_filename = str(p.with_suffix('.c'))

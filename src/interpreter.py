@@ -135,10 +135,12 @@ class InterpreterInstance:
 
 
 class Interpreter(ASTVisitor):
-    def __init__(self, output_callback: Optional[Callable] = None):
+    def __init__(self, output_callback: Optional[Callable] = None, base_dir: Optional[str] = None):
         self.globals = Environment()
         self.environment = self.globals
         self.output_callback = output_callback or print
+        self.base_dir = base_dir
+        self.imported_modules = set()
         self._setup_builtins()
 
     def _setup_builtins(self) -> None:
@@ -491,6 +493,32 @@ class Interpreter(ASTVisitor):
         val = self.visit(node.expression)
         raise ThrownException(val)
 
+    def visit_ImportNode(self, node: ImportNode) -> Any:
+        from pathlib import Path
+        try:
+            from .parser import load_module_ast
+        except ImportError:
+            from parser import load_module_ast
+
+        try:
+            canonical_path, mod_ast = load_module_ast(node.path, self.base_dir)
+        except Exception as e:
+            raise RuntimeError(str(e))
+
+        if canonical_path in self.imported_modules:
+            return None
+        self.imported_modules.add(canonical_path)
+
+        prev_base = self.base_dir
+        self.base_dir = str(Path(canonical_path).parent)
+        try:
+            result = None
+            for stmt in mod_ast.statements:
+                result = self.visit(stmt)
+            return result
+        finally:
+            self.base_dir = prev_base
+
     def get_variables(self) -> Dict[str, Any]:
         return self.environment.variables.copy()
 
@@ -501,12 +529,12 @@ class Interpreter(ASTVisitor):
         self.environment.variables.clear()
 
 
-def interpret_string(source: str, output_callback=None) -> Any:
+def interpret_string(source: str, output_callback=None, base_dir: Optional[str] = None) -> Any:
     try:
         from .parser import parse_string
     except ImportError:
         from parser import parse_string
 
     ast = parse_string(source)
-    interpreter = Interpreter(output_callback)
+    interpreter = Interpreter(output_callback, base_dir=base_dir)
     return interpreter.interpret(ast)

@@ -77,7 +77,7 @@ let list = [1, 2, 3];
 append(list, 4);
 let squares = map(fn(x) { return x * x; }, list);
 let total = reduce(fn(a, b) { return a + b; }, squares, 0);
-print total; // 30
+print "Sum of squares: ${total}"; // Sum of squares: 30
 
 // Exception Handling
 try {

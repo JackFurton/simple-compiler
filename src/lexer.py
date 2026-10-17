@@ -39,6 +39,7 @@ class Lexer:
         'try': TokenType.TRY,
         'catch': TokenType.CATCH,
         'throw': TokenType.THROW,
+        'import': TokenType.IMPORT,
     }
 
     def __init__(self, text: str):
@@ -89,20 +90,47 @@ class Lexer:
         self._advance()  # Skip opening quote
 
         result = []
-        while self.current_char is not None and self.current_char != '"':
+        interp_depth = 0
+        in_inner_string = False
+        while self.current_char is not None:
+            if self.current_char == '"' and interp_depth == 0:
+                break
             if self.current_char == '\\':
                 self._advance()
                 if self.current_char is None:
                     raise LexerError("Unterminated escape sequence in string", self.line, self.column)
-                escape_chars = {
-                    'n': '\n',
-                    't': '\t',
-                    'r': '\r',
-                    '\\': '\\',
-                    '"': '"',
-                    "'": "'",
-                }
-                result.append(escape_chars.get(self.current_char, self.current_char))
+                if interp_depth > 0:
+                    result.append('\\')
+                    result.append(self.current_char)
+                elif self.current_char == '$':
+                    result.append('\x00$')
+                else:
+                    escape_chars = {
+                        'n': '\n',
+                        't': '\t',
+                        'r': '\r',
+                        '\\': '\\',
+                        '"': '"',
+                        "'": "'",
+                    }
+                    result.append(escape_chars.get(self.current_char, self.current_char))
+            elif interp_depth > 0:
+                if self.current_char == '"':
+                    in_inner_string = not in_inner_string
+                    result.append('"')
+                elif not in_inner_string and self.current_char == '{':
+                    interp_depth += 1
+                    result.append('{')
+                elif not in_inner_string and self.current_char == '}':
+                    interp_depth -= 1
+                    result.append('}')
+                else:
+                    result.append(self.current_char)
+            elif self.current_char == '$' and self._peek(1) == '{':
+                result.append('$')
+                self._advance()
+                result.append('{')
+                interp_depth = 1
             elif self.current_char == '\n':
                 result.append('\n')
             else:

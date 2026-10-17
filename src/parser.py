@@ -11,7 +11,7 @@ try:
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
         DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode,
-        LambdaNode
+        LambdaNode, ImportNode
     )
 except ImportError:
     from tokens import Token, TokenType
@@ -25,7 +25,7 @@ except ImportError:
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
         DebuggerNode, TryCatchNode, ThrowNode, BreakNode, ContinueNode,
-        LambdaNode
+        LambdaNode, ImportNode
     )
 
 
@@ -91,6 +91,9 @@ class Parser:
         if self._check(TokenType.EOF):
             return None
 
+        if self._match(TokenType.IMPORT):
+            return self._import_declaration()
+
         if self._match(TokenType.CLASS):
             return self._class_declaration()
 
@@ -108,6 +111,12 @@ class Parser:
             return self._var_declaration()
 
         return self._statement()
+
+    def _import_declaration(self) -> ImportNode:
+        token = self.previous_token
+        path_token = self._eat(TokenType.STRING, "Expected module path string after 'import'")
+        self._match(TokenType.SEMICOLON)
+        return ImportNode(path_token.value, line=token.line, column=token.column)
 
     def _class_declaration(self) -> ClassDefNode:
         token = self.previous_token
@@ -608,7 +617,7 @@ class Parser:
             return NumberNode(val, line=token.line, column=token.column)
 
         if self._match(TokenType.STRING):
-            return StringNode(token.value, line=token.line, column=token.column)
+            return self._parse_interpolated_string(token.value, token.line, token.column)
 
         if self._match(TokenType.LBRACKET):
             start_token = self.previous_token
@@ -660,8 +669,102 @@ class Parser:
 
         self._error(f"Unexpected token {token.type.name}")
 
+    def _parse_interpolated_string(self, raw: str, line: int, column: int) -> ASTNode:
+        if '${' not in raw:
+            return StringNode(raw.replace('\x00$', '$'), line=line, column=column)
+
+        parts: List[ASTNode] = []
+        lit_buf: List[str] = []
+        i = 0
+        n = len(raw)
+
+        while i < n:
+            if raw[i:i + 2] == '\x00$':
+                lit_buf.append('$')
+                i += 2
+            elif raw[i:i + 2] == '${':
+                if lit_buf or not parts:
+                    parts.append(StringNode("".join(lit_buf), line=line, column=column))
+                    lit_buf = []
+                i += 2
+                expr_start = i
+                depth = 1
+                in_str = False
+                while i < n and depth > 0:
+                    ch = raw[i]
+                    if ch == '\\' and in_str:
+                        i += 2
+                        continue
+                    if ch == '"':
+                        in_str = not in_str
+                    elif not in_str:
+                        if ch == '{':
+                            depth += 1
+                        elif ch == '}':
+                            depth -= 1
+                            if depth == 0:
+                                break
+                    i += 1
+                if depth != 0:
+                    self._error("Unterminated string interpolation '${...}'")
+                expr_src = raw[expr_start:i].strip()
+                if not expr_src:
+                    self._error("Empty expression in string interpolation '${}'")
+                i += 1  # skip closing '}'
+                sub_lexer = Lexer(expr_src)
+                sub_parser = Parser(sub_lexer)
+                expr_node = sub_parser._expression()
+                str_call = CallNode(
+                    VariableNode("str", line=line, column=column),
+                    [expr_node],
+                    line=line,
+                    column=column
+                )
+                parts.append(str_call)
+            else:
+                lit_buf.append(raw[i])
+                i += 1
+
+        if lit_buf:
+            parts.append(StringNode("".join(lit_buf), line=line, column=column))
+
+        if not parts:
+            return StringNode("", line=line, column=column)
+
+        result = parts[0]
+        for part in parts[1:]:
+            result = BinaryOpNode(result, '+', part, line=line, column=column)
+        return result
+
 
 def parse_string(source: str) -> ProgramNode:
     lexer = Lexer(source)
     parser = Parser(lexer)
     return parser.parse()
+
+
+def load_module_ast(path: str, base_dir: Optional[str] = None):
+    from pathlib import Path
+    candidates = []
+    p = Path(path)
+    names = [path] if path.endswith('.lang') else [path, f"{path}.lang"]
+    if p.is_absolute():
+        candidates = [Path(name) for name in names]
+    else:
+        if base_dir:
+            for name in names:
+                candidates.append(Path(base_dir) / name)
+        for name in names:
+            candidates.append(Path.cwd() / name)
+
+    resolved = None
+    for cand in candidates:
+        if cand.exists() and cand.is_file():
+            resolved = cand.resolve()
+            break
+
+    if resolved is None:
+        raise FileNotFoundError(f"Module not found: '{path}'")
+
+    source = resolved.read_text(encoding='utf-8')
+    return str(resolved), parse_string(source)
