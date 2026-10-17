@@ -8,7 +8,7 @@ try:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode
+        DebuggerNode, TryCatchNode, ThrowNode
     )
 except ImportError:
     from ast_nodes import (
@@ -19,7 +19,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ListNode, DictNode,
         IndexNode, IndexAssignmentNode, ClassDefNode,
         GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode
+        DebuggerNode, TryCatchNode, ThrowNode
     )
 
 
@@ -217,3 +217,11 @@ class ASTOptimizer:
 
     def opt_DebuggerNode(self, node: DebuggerNode) -> DebuggerNode:
         return node
+
+    def opt_TryCatchNode(self, node: TryCatchNode) -> TryCatchNode:
+        opt_try = self.opt_BlockNode(node.try_block)
+        opt_catch = self.opt_BlockNode(node.catch_block)
+        return TryCatchNode(opt_try, node.catch_var, opt_catch, line=node.line, column=node.column)
+
+    def opt_ThrowNode(self, node: ThrowNode) -> ThrowNode:
+        return ThrowNode(self.optimize(node.expression), line=node.line, column=node.column)

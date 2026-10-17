@@ -1,0 +1,74 @@
+// Simple Compiler - Exception Handling (try / catch / throw) Demo
+//
+// Run on the Bytecode VM:
+//   python3 main.py examples/exceptions_demo.lang
+//
+// Or compile to a standalone native binary (via C setjmp/longjmp):
+//   python3 main.py --build examples/exceptions_demo.lang -o exceptions_demo
+//   ./exceptions_demo
+
+class ValidationError {
+    init(field, message) {
+        this.field = field;
+        this.message = message;
+    }
+
+    format() {
+        return "ValidationError on '" + this.field + "': " + this.message;
+    }
+}
+
+fn validate_age(age) {
+    if (age < 0) {
+        throw ValidationError("age", "Age cannot be negative (" + str(age) + ")");
+    }
+    if (age > 150) {
+        throw ValidationError("age", "Age seems unrealistic (" + str(age) + ")");
+    }
+    return "Valid age: " + str(age);
+}
+
+print "--- 1. Custom Exception Objects ---";
+let test_ages = [25, -5, 200];
+let i = 0;
+while (i < len(test_ages)) {
+    try {
+        print validate_age(test_ages[i]);
+    } catch (err) {
+        print "Caught -> " + err.format();
+    }
+    i = i + 1;
+}
+
+print "\n--- 2. Deep Call-Stack Unwinding & Rethrow ---";
+fn database_query(id) {
+    if (id == 0) {
+        throw {"code": 503, "error": "Database connection refused"};
+    }
+    return "Record #" + str(id);
+}
+
+fn service_layer(id) {
+    try {
+        return database_query(id);
+    } catch (db_err) {
+        print "Service logging error code " + str(db_err["code"]);
+        throw "ServiceUnavailable: " + db_err["error"];
+    }
+}
+
+try {
+    print service_layer(42);
+    print service_layer(0);
+} catch (app_err) {
+    print "Controller caught -> " + app_err;
+}
+
+print "\n--- 3. Catching Runtime Errors ---";
+let divisor = 0;
+try {
+    let ratio = 100 / divisor;
+    print ratio;
+} catch (math_err) {
+    print "Recovered from runtime error: " + math_err;
+}

@@ -308,6 +308,29 @@ class DebuggerNode(ASTNode):
 
 
 @dataclass
+class TryCatchNode(ASTNode):
+    try_block: BlockNode
+    catch_var: Optional[str]
+    catch_block: BlockNode
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        var_str = f"({self.catch_var}) " if self.catch_var else ""
+        return f"TryCatch({self.try_block} catch {var_str}{self.catch_block})"
+
+
+@dataclass
+class ThrowNode(ASTNode):
+    expression: ASTNode
+    line: int = 1
+    column: int = 1
+
+    def __str__(self):
+        return f"Throw({self.expression})"
+
+
+@dataclass
 class ProgramNode(ASTNode):
     statements: List[ASTNode] = field(default_factory=list)
     line: int = 1
@@ -319,6 +342,12 @@ class ProgramNode(ASTNode):
 
 
 class ASTVisitor(ABC):
+    def visit_TryCatchNode(self, node: TryCatchNode) -> Any:
+        pass
+
+    def visit_ThrowNode(self, node: ThrowNode) -> Any:
+        pass
+
     def visit_ClassDefNode(self, node: ClassDefNode) -> Any:
         pass
 

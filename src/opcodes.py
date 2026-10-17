@@ -65,3 +65,8 @@ class OpCode(IntEnum):
     # Output & Debugging
     OP_PRINT = auto()          # pops val, outputs it
     OP_DEBUGGER = auto()       # triggers debugger breakpoint
+
+    # Exception Handling
+    OP_PUSH_HANDLER = auto()   # [catch_offset: 2 bytes] pushes exception handler
+    OP_POP_HANDLER = auto()    # pops active exception handler
+    OP_THROW = auto()          # pops value and unwinds to nearest handler

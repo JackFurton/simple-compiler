@@ -24,6 +24,17 @@ class VMError(Exception):
         super().__init__(formatted)
 
 
+class _VMUnwind(Exception):
+    pass
+
+
+@dataclass
+class ExceptionHandler:
+    frame_index: int
+    catch_ip: int
+    stack_depth: int
+
+
 @dataclass
 class CallFrame:
     closure: ClosureObject
@@ -66,6 +77,7 @@ class VM:
         self.output_callback = output_callback or print
         self.stack: List[Any] = []
         self.frames: List[CallFrame] = []
+        self.handlers: List[ExceptionHandler] = []
         self.open_upvalues: List[ObjUpvalue] = []
         self.globals: Dict[str, Any] = self._setup_globals()
         self.builtins: Dict[str, Callable] = self._setup_builtins()
@@ -139,7 +151,18 @@ class VM:
     def is_truthy(self, value: Any) -> bool:
         return bool(value)
 
+    def unwind_to_handler(self, value: Any) -> None:
+        handler = self.handlers.pop()
+        self.close_upvalues(handler.stack_depth)
+        self.frames = self.frames[:handler.frame_index + 1]
+        self.stack = self.stack[:handler.stack_depth]
+        self.frames[-1].ip = handler.catch_ip
+        self.push(value)
+        raise _VMUnwind()
+
     def runtime_error(self, message: str) -> None:
+        if self.handlers:
+            self.unwind_to_handler(message)
         trace = []
         for frame in reversed(self.frames):
             fn_name = frame.function.name or "<script>"
@@ -237,6 +260,7 @@ class VM:
     def interpret(self, main_function: Union[FunctionObject, ClosureObject]) -> Any:
         self.stack.clear()
         self.frames.clear()
+        self.handlers.clear()
         self.open_upvalues.clear()
         if isinstance(main_function, ClosureObject):
             main_closure = main_function
@@ -262,299 +286,325 @@ class VM:
             except DebuggerExit:
                 return None
 
-            byte_val = frame.read_byte()
             try:
-                opcode = OpCode(byte_val)
-            except ValueError:
-                self.runtime_error(f"Unknown opcode byte: {byte_val}")
+                byte_val = frame.read_byte()
+                try:
+                    opcode = OpCode(byte_val)
+                except ValueError:
+                    self.runtime_error(f"Unknown opcode byte: {byte_val}")
 
-            if opcode == OpCode.OP_CONSTANT:
-                constant = frame.read_constant()
-                self.push(constant)
+                if opcode == OpCode.OP_CONSTANT:
+                    constant = frame.read_constant()
+                    self.push(constant)
 
-            elif opcode == OpCode.OP_NIL:
-                self.push(None)
+                elif opcode == OpCode.OP_NIL:
+                    self.push(None)
 
-            elif opcode == OpCode.OP_TRUE:
-                self.push(True)
+                elif opcode == OpCode.OP_TRUE:
+                    self.push(True)
 
-            elif opcode == OpCode.OP_FALSE:
-                self.push(False)
+                elif opcode == OpCode.OP_FALSE:
+                    self.push(False)
 
-            elif opcode == OpCode.OP_POP:
-                self.pop()
+                elif opcode == OpCode.OP_POP:
+                    self.pop()
 
-            elif opcode == OpCode.OP_DUP:
-                self.push(self.peek(0))
+                elif opcode == OpCode.OP_DUP:
+                    self.push(self.peek(0))
 
-            elif opcode == OpCode.OP_GET_LOCAL:
-                slot = frame.read_u16()
-                self.push(self.stack[frame.slots + slot])
+                elif opcode == OpCode.OP_GET_LOCAL:
+                    slot = frame.read_u16()
+                    self.push(self.stack[frame.slots + slot])
 
-            elif opcode == OpCode.OP_SET_LOCAL:
-                slot = frame.read_u16()
-                self.stack[frame.slots + slot] = self.peek(0)
+                elif opcode == OpCode.OP_SET_LOCAL:
+                    slot = frame.read_u16()
+                    self.stack[frame.slots + slot] = self.peek(0)
 
-            elif opcode == OpCode.OP_GET_UPVALUE:
-                slot = frame.read_u16()
-                upval = frame.closure.upvalues[slot]
-                self.push(upval.get(self.stack))
+                elif opcode == OpCode.OP_GET_UPVALUE:
+                    slot = frame.read_u16()
+                    upval = frame.closure.upvalues[slot]
+                    self.push(upval.get(self.stack))
 
-            elif opcode == OpCode.OP_SET_UPVALUE:
-                slot = frame.read_u16()
-                upval = frame.closure.upvalues[slot]
-                upval.set(self.stack, self.peek(0))
+                elif opcode == OpCode.OP_SET_UPVALUE:
+                    slot = frame.read_u16()
+                    upval = frame.closure.upvalues[slot]
+                    upval.set(self.stack, self.peek(0))
 
-            elif opcode == OpCode.OP_CLOSE_UPVALUE:
-                self.close_upvalues(len(self.stack) - 1)
-                self.pop()
+                elif opcode == OpCode.OP_CLOSE_UPVALUE:
+                    self.close_upvalues(len(self.stack) - 1)
+                    self.pop()
 
-            elif opcode == OpCode.OP_DEFINE_GLOBAL:
-                name = frame.read_constant()
-                self.globals[name] = self.pop()
+                elif opcode == OpCode.OP_DEFINE_GLOBAL:
+                    name = frame.read_constant()
+                    self.globals[name] = self.pop()
 
-            elif opcode == OpCode.OP_GET_GLOBAL:
-                name = frame.read_constant()
-                if name in self.globals:
-                    self.push(self.globals[name])
-                elif name in self.builtins:
-                    self.push(self.builtins[name])
-                else:
-                    self.runtime_error(f"Undefined variable '{name}'")
+                elif opcode == OpCode.OP_GET_GLOBAL:
+                    name = frame.read_constant()
+                    if name in self.globals:
+                        self.push(self.globals[name])
+                    elif name in self.builtins:
+                        self.push(self.builtins[name])
+                    else:
+                        self.runtime_error(f"Undefined variable '{name}'")
 
-            elif opcode == OpCode.OP_SET_GLOBAL:
-                name = frame.read_constant()
-                if name in self.builtins and name not in self.globals:
-                    self.runtime_error(f"Cannot overwrite built-in '{name}'")
-                self.globals[name] = self.peek(0)
+                elif opcode == OpCode.OP_SET_GLOBAL:
+                    name = frame.read_constant()
+                    if name in self.builtins and name not in self.globals:
+                        self.runtime_error(f"Cannot overwrite built-in '{name}'")
+                    self.globals[name] = self.peek(0)
 
-            elif opcode == OpCode.OP_EQUAL:
-                b = self.pop()
-                a = self.pop()
-                self.push(a == b)
+                elif opcode == OpCode.OP_EQUAL:
+                    b = self.pop()
+                    a = self.pop()
+                    self.push(a == b)
 
-            elif opcode == OpCode.OP_GREATER:
-                b = self.pop()
-                a = self.pop()
-                if not (isinstance(a, (int, float, str)) and isinstance(b, (int, float, str)) and type(a) == type(b)):
+                elif opcode == OpCode.OP_GREATER:
+                    b = self.pop()
+                    a = self.pop()
+                    if not (isinstance(a, (int, float, str)) and isinstance(b, (int, float, str)) and type(a) == type(b)):
+                        if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
+                            self.runtime_error(f"Cannot compare '{type(a).__name__}' and '{type(b).__name__}'")
+                    self.push(a > b)
+
+                elif opcode == OpCode.OP_LESS:
+                    b = self.pop()
+                    a = self.pop()
+                    if not (isinstance(a, (int, float, str)) and isinstance(b, (int, float, str)) and type(a) == type(b)):
+                        if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
+                            self.runtime_error(f"Cannot compare '{type(a).__name__}' and '{type(b).__name__}'")
+                    self.push(a < b)
+
+                elif opcode == OpCode.OP_ADD:
+                    b = self.pop()
+                    a = self.pop()
+                    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                        self.push(a + b)
+                    elif isinstance(a, str) or isinstance(b, str):
+                        self.push(str(a) + str(b))
+                    else:
+                        self.runtime_error(f"Cannot add '{type(a).__name__}' and '{type(b).__name__}'")
+
+                elif opcode == OpCode.OP_SUB:
+                    b = self.pop()
+                    a = self.pop()
                     if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
-                        self.runtime_error(f"Cannot compare '{type(a).__name__}' and '{type(b).__name__}'")
-                self.push(a > b)
+                        self.runtime_error(f"Operands must be numbers, got '{type(a).__name__}' and '{type(b).__name__}'")
+                    self.push(a - b)
 
-            elif opcode == OpCode.OP_LESS:
-                b = self.pop()
-                a = self.pop()
-                if not (isinstance(a, (int, float, str)) and isinstance(b, (int, float, str)) and type(a) == type(b)):
+                elif opcode == OpCode.OP_MUL:
+                    b = self.pop()
+                    a = self.pop()
+                    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                        self.push(a * b)
+                    elif isinstance(a, str) and isinstance(b, int):
+                        self.push(a * b)
+                    else:
+                        self.runtime_error(f"Cannot multiply '{type(a).__name__}' and '{type(b).__name__}'")
+
+                elif opcode == OpCode.OP_DIV:
+                    b = self.pop()
+                    a = self.pop()
                     if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
-                        self.runtime_error(f"Cannot compare '{type(a).__name__}' and '{type(b).__name__}'")
-                self.push(a < b)
+                        self.runtime_error(f"Operands must be numbers, got '{type(a).__name__}' and '{type(b).__name__}'")
+                    if b == 0:
+                        self.runtime_error("Division by zero")
+                    self.push(a / b)
 
-            elif opcode == OpCode.OP_ADD:
-                b = self.pop()
-                a = self.pop()
-                if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-                    self.push(a + b)
-                elif isinstance(a, str) or isinstance(b, str):
-                    self.push(str(a) + str(b))
-                else:
-                    self.runtime_error(f"Cannot add '{type(a).__name__}' and '{type(b).__name__}'")
+                elif opcode == OpCode.OP_MOD:
+                    b = self.pop()
+                    a = self.pop()
+                    if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
+                        self.runtime_error(f"Operands must be numbers, got '{type(a).__name__}' and '{type(b).__name__}'")
+                    if b == 0:
+                        self.runtime_error("Modulo by zero")
+                    self.push(a % b)
 
-            elif opcode == OpCode.OP_SUB:
-                b = self.pop()
-                a = self.pop()
-                if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
-                    self.runtime_error(f"Operands must be numbers, got '{type(a).__name__}' and '{type(b).__name__}'")
-                self.push(a - b)
+                elif opcode == OpCode.OP_NOT:
+                    self.push(not self.is_truthy(self.pop()))
 
-            elif opcode == OpCode.OP_MUL:
-                b = self.pop()
-                a = self.pop()
-                if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-                    self.push(a * b)
-                elif isinstance(a, str) and isinstance(b, int):
-                    self.push(a * b)
-                else:
-                    self.runtime_error(f"Cannot multiply '{type(a).__name__}' and '{type(b).__name__}'")
+                elif opcode == OpCode.OP_NEGATE:
+                    val = self.pop()
+                    if not isinstance(val, (int, float)):
+                        self.runtime_error(f"Operand must be a number, got '{type(val).__name__}'")
+                    self.push(-val)
 
-            elif opcode == OpCode.OP_DIV:
-                b = self.pop()
-                a = self.pop()
-                if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
-                    self.runtime_error(f"Operands must be numbers, got '{type(a).__name__}' and '{type(b).__name__}'")
-                if b == 0:
-                    self.runtime_error("Division by zero")
-                self.push(a / b)
+                elif opcode == OpCode.OP_PRINT:
+                    val = self.pop()
+                    self.output_callback(val)
 
-            elif opcode == OpCode.OP_MOD:
-                b = self.pop()
-                a = self.pop()
-                if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
-                    self.runtime_error(f"Operands must be numbers, got '{type(a).__name__}' and '{type(b).__name__}'")
-                if b == 0:
-                    self.runtime_error("Modulo by zero")
-                self.push(a % b)
-
-            elif opcode == OpCode.OP_NOT:
-                self.push(not self.is_truthy(self.pop()))
-
-            elif opcode == OpCode.OP_NEGATE:
-                val = self.pop()
-                if not isinstance(val, (int, float)):
-                    self.runtime_error(f"Operand must be a number, got '{type(val).__name__}'")
-                self.push(-val)
-
-            elif opcode == OpCode.OP_PRINT:
-                val = self.pop()
-                self.output_callback(val)
-
-            elif opcode == OpCode.OP_DEBUGGER:
-                if self.debugger is not None:
-                    self.debugger.on_debugger_statement(frame)
-                elif self.debug_hook is not None:
-                    self.debug_hook(self, frame)
-                else:
-                    import sys
-                    if sys.stdin.isatty():
-                        try:
-                            from .debugger import Debugger
-                        except ImportError:
-                            from debugger import Debugger
-                        self.debugger = Debugger(self)
+                elif opcode == OpCode.OP_DEBUGGER:
+                    if self.debugger is not None:
                         self.debugger.on_debugger_statement(frame)
+                    elif self.debug_hook is not None:
+                        self.debug_hook(self, frame)
+                    else:
+                        import sys
+                        if sys.stdin.isatty():
+                            try:
+                                from .debugger import Debugger
+                            except ImportError:
+                                from debugger import Debugger
+                            self.debugger = Debugger(self)
+                            self.debugger.on_debugger_statement(frame)
 
-            elif opcode == OpCode.OP_JUMP:
-                offset = frame.read_u16()
-                frame.ip += offset
-
-            elif opcode == OpCode.OP_JUMP_IF_FALSE:
-                offset = frame.read_u16()
-                if not self.is_truthy(self.peek(0)):
+                elif opcode == OpCode.OP_JUMP:
+                    offset = frame.read_u16()
                     frame.ip += offset
 
-            elif opcode == OpCode.OP_LOOP:
-                offset = frame.read_u16()
-                frame.ip -= offset
+                elif opcode == OpCode.OP_JUMP_IF_FALSE:
+                    offset = frame.read_u16()
+                    if not self.is_truthy(self.peek(0)):
+                        frame.ip += offset
 
-            elif opcode == OpCode.OP_CLOSURE:
-                const_idx = frame.read_u16()
-                fn = frame.function.chunk.constants[const_idx]
-                closure = ClosureObject(function=fn)
-                for _ in range(fn.upvalue_count):
-                    is_local = frame.read_byte()
-                    index = frame.read_u16()
-                    if is_local:
-                        closure.upvalues.append(self.capture_upvalue(frame.slots + index))
-                    else:
-                        closure.upvalues.append(frame.closure.upvalues[index])
-                self.push(closure)
+                elif opcode == OpCode.OP_LOOP:
+                    offset = frame.read_u16()
+                    frame.ip -= offset
 
-            elif opcode == OpCode.OP_CALL:
-                arg_count = frame.read_byte()
-                self.call_value(self.peek(arg_count), arg_count)
+                elif opcode == OpCode.OP_PUSH_HANDLER:
+                    offset = frame.read_u16()
+                    catch_ip = frame.ip + offset
+                    self.handlers.append(ExceptionHandler(
+                        frame_index=len(self.frames) - 1,
+                        catch_ip=catch_ip,
+                        stack_depth=len(self.stack)
+                    ))
 
-            elif opcode == OpCode.OP_CLASS:
-                name = frame.read_constant()
-                self.push(ClassObject(name=name))
+                elif opcode == OpCode.OP_POP_HANDLER:
+                    if self.handlers:
+                        self.handlers.pop()
 
-            elif opcode == OpCode.OP_INHERIT:
-                super_val = self.pop()
-                sub_val = self.peek(0)
-                if not isinstance(super_val, ClassObject):
-                    self.runtime_error(f"Superclass must be a class, got {type(super_val).__name__}")
-                if super_val is sub_val:
-                    self.runtime_error("A class cannot inherit from itself")
-                sub_val.superclass = super_val
-
-            elif opcode == OpCode.OP_METHOD:
-                name = frame.read_constant()
-                method_closure = self.pop()
-                klass = self.peek(0)
-                if not isinstance(klass, ClassObject):
-                    self.runtime_error("OP_METHOD called without class on stack")
-                klass.methods[name] = method_closure
-                method_closure.function.klass = klass
-
-            elif opcode == OpCode.OP_GET_PROPERTY:
-                name = frame.read_constant()
-                target = self.pop()
-                if not isinstance(target, InstanceObject):
-                    self.runtime_error(f"Only instances have properties, got {type(target).__name__}")
-                if name in target.fields:
-                    self.push(target.fields[name])
-                else:
-                    method = target.klass.find_method(name)
-                    if method is not None:
-                        self.push(BoundMethod(receiver=target, method=method))
-                    else:
-                        self.runtime_error(f"Undefined property '{name}' on instance of {target.klass.name}")
-
-            elif opcode == OpCode.OP_SET_PROPERTY:
-                name = frame.read_constant()
-                val = self.pop()
-                target = self.pop()
-                if not isinstance(target, InstanceObject):
-                    self.runtime_error(f"Only instances have fields, got {type(target).__name__}")
-                target.set_field(name, val)
-                self.push(val)
-
-            elif opcode == OpCode.OP_GET_SUPER:
-                name = frame.read_constant()
-                receiver = self.pop()
-                if not isinstance(receiver, InstanceObject):
-                    self.runtime_error("Invalid receiver for super call")
-                current_klass = frame.function.klass
-                if current_klass is None or current_klass.superclass is None:
-                    self.runtime_error("Cannot resolve superclass for super call")
-                method = current_klass.superclass.find_method(name)
-                if method is None:
-                    self.runtime_error(f"Undefined property '{name}' in superclass '{current_klass.superclass.name}'")
-                self.push(BoundMethod(receiver=receiver, method=method))
-
-            elif opcode == OpCode.OP_BUILD_LIST:
-                count = frame.read_u16()
-                elements = []
-                for _ in range(count):
-                    elements.append(self.pop())
-                elements.reverse()
-                self.push(elements)
-
-            elif opcode == OpCode.OP_BUILD_MAP:
-                count = frame.read_u16()
-                pairs = []
-                for _ in range(count):
+                elif opcode == OpCode.OP_THROW:
                     val = self.pop()
-                    key = self.pop()
-                    pairs.append((key, val))
-                pairs.reverse()
-                d = {k: v for k, v in pairs}
-                self.push(d)
+                    if self.handlers:
+                        self.unwind_to_handler(val)
+                    else:
+                        msg = val if isinstance(val, str) else f"Uncaught exception: {val}"
+                        self.runtime_error(msg)
 
-            elif opcode == OpCode.OP_GET_INDEX:
-                index = self.pop()
-                target = self.pop()
-                try:
-                    self.push(target[index])
-                except (IndexError, KeyError, TypeError) as e:
-                    self.runtime_error(f"Index error: {e}")
+                elif opcode == OpCode.OP_CLOSURE:
+                    const_idx = frame.read_u16()
+                    fn = frame.function.chunk.constants[const_idx]
+                    closure = ClosureObject(function=fn)
+                    for _ in range(fn.upvalue_count):
+                        is_local = frame.read_byte()
+                        index = frame.read_u16()
+                        if is_local:
+                            closure.upvalues.append(self.capture_upvalue(frame.slots + index))
+                        else:
+                            closure.upvalues.append(frame.closure.upvalues[index])
+                    self.push(closure)
 
-            elif opcode == OpCode.OP_SET_INDEX:
-                val = self.pop()
-                index = self.pop()
-                target = self.pop()
-                try:
-                    target[index] = val
+                elif opcode == OpCode.OP_CALL:
+                    arg_count = frame.read_byte()
+                    self.call_value(self.peek(arg_count), arg_count)
+
+                elif opcode == OpCode.OP_CLASS:
+                    name = frame.read_constant()
+                    self.push(ClassObject(name=name))
+
+                elif opcode == OpCode.OP_INHERIT:
+                    super_val = self.pop()
+                    sub_val = self.peek(0)
+                    if not isinstance(super_val, ClassObject):
+                        self.runtime_error(f"Superclass must be a class, got {type(super_val).__name__}")
+                    if super_val is sub_val:
+                        self.runtime_error("A class cannot inherit from itself")
+                    sub_val.superclass = super_val
+
+                elif opcode == OpCode.OP_METHOD:
+                    name = frame.read_constant()
+                    method_closure = self.pop()
+                    klass = self.peek(0)
+                    if not isinstance(klass, ClassObject):
+                        self.runtime_error("OP_METHOD called without class on stack")
+                    klass.methods[name] = method_closure
+                    method_closure.function.klass = klass
+
+                elif opcode == OpCode.OP_GET_PROPERTY:
+                    name = frame.read_constant()
+                    target = self.pop()
+                    if not isinstance(target, InstanceObject):
+                        self.runtime_error(f"Only instances have properties, got {type(target).__name__}")
+                    if name in target.fields:
+                        self.push(target.fields[name])
+                    else:
+                        method = target.klass.find_method(name)
+                        if method is not None:
+                            self.push(BoundMethod(receiver=target, method=method))
+                        else:
+                            self.runtime_error(f"Undefined property '{name}' on instance of {target.klass.name}")
+
+                elif opcode == OpCode.OP_SET_PROPERTY:
+                    name = frame.read_constant()
+                    val = self.pop()
+                    target = self.pop()
+                    if not isinstance(target, InstanceObject):
+                        self.runtime_error(f"Only instances have fields, got {type(target).__name__}")
+                    target.set_field(name, val)
                     self.push(val)
-                except (IndexError, KeyError, TypeError) as e:
-                    self.runtime_error(f"Index assignment error: {e}")
 
-            elif opcode == OpCode.OP_RETURN:
-                result = self.pop()
-                self.close_upvalues(frame.slots)
-                prev_frame = self.frames.pop()
-                if not self.frames:
-                    return result
-                # Reset stack to the base of the returning function frame
-                self.stack = self.stack[:prev_frame.slots]
-                self.push(result)
+                elif opcode == OpCode.OP_GET_SUPER:
+                    name = frame.read_constant()
+                    receiver = self.pop()
+                    if not isinstance(receiver, InstanceObject):
+                        self.runtime_error("Invalid receiver for super call")
+                    current_klass = frame.function.klass
+                    if current_klass is None or current_klass.superclass is None:
+                        self.runtime_error("Cannot resolve superclass for super call")
+                    method = current_klass.superclass.find_method(name)
+                    if method is None:
+                        self.runtime_error(f"Undefined property '{name}' in superclass '{current_klass.superclass.name}'")
+                    self.push(BoundMethod(receiver=receiver, method=method))
+
+                elif opcode == OpCode.OP_BUILD_LIST:
+                    count = frame.read_u16()
+                    elements = []
+                    for _ in range(count):
+                        elements.append(self.pop())
+                    elements.reverse()
+                    self.push(elements)
+
+                elif opcode == OpCode.OP_BUILD_MAP:
+                    count = frame.read_u16()
+                    pairs = []
+                    for _ in range(count):
+                        val = self.pop()
+                        key = self.pop()
+                        pairs.append((key, val))
+                    pairs.reverse()
+                    d = {k: v for k, v in pairs}
+                    self.push(d)
+
+                elif opcode == OpCode.OP_GET_INDEX:
+                    index = self.pop()
+                    target = self.pop()
+                    try:
+                        self.push(target[index])
+                    except (IndexError, KeyError, TypeError) as e:
+                        self.runtime_error(f"Index error: {e}")
+
+                elif opcode == OpCode.OP_SET_INDEX:
+                    val = self.pop()
+                    index = self.pop()
+                    target = self.pop()
+                    try:
+                        target[index] = val
+                        self.push(val)
+                    except (IndexError, KeyError, TypeError) as e:
+                        self.runtime_error(f"Index assignment error: {e}")
+
+                elif opcode == OpCode.OP_RETURN:
+                    result = self.pop()
+                    self.close_upvalues(frame.slots)
+                    prev_frame = self.frames.pop()
+                    while self.handlers and self.handlers[-1].frame_index >= len(self.frames):
+                        self.handlers.pop()
+                    if not self.frames:
+                        return result
+                    # Reset stack to the base of the returning function frame
+                    self.stack = self.stack[:prev_frame.slots]
+                    self.push(result)
+            except _VMUnwind:
+                continue
 
         return None

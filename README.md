@@ -76,6 +76,13 @@ print counter(); // 12
 let list = [1, 2, 3];
 append(list, 4);
 print len(list); // 4
+
+// Exception Handling
+try {
+    throw "Invalid operation";
+} catch (err) {
+    print "Caught: " + err;
+}
 ```
 
 ## Testing

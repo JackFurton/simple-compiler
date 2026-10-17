@@ -12,7 +12,7 @@ try:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode
+        DebuggerNode, TryCatchNode, ThrowNode
     )
     from .opcodes import OpCode
     from .chunk import Chunk, FunctionObject
@@ -26,7 +26,7 @@ except ImportError:
         ExpressionStmtNode, ProgramNode, ASTVisitor,
         ListNode, DictNode, IndexNode, IndexAssignmentNode,
         ClassDefNode, GetPropertyNode, SetPropertyNode, ThisNode, SuperPropertyNode,
-        DebuggerNode
+        DebuggerNode, TryCatchNode, ThrowNode
     )
     from opcodes import OpCode
     from chunk import Chunk, FunctionObject
@@ -75,6 +75,7 @@ class BytecodeCompiler(ASTVisitor):
         self.locals: List[Local] = []
         self.upvalues: List[CompilerUpvalue] = []
         self.scope_depth: int = 0
+        self.try_depth: int = 0
 
         # Slot 0 in call frame is reserved for function/closure, or "this" in methods
         slot0_name = "this" if fn_type in (FunctionType.TYPE_METHOD, FunctionType.TYPE_INITIALIZER) else ""
@@ -414,7 +415,7 @@ class BytecodeCompiler(ASTVisitor):
             fn_compiler.mark_initialized()
 
         for stmt in node.body.statements:
-            fn_compiler.visit(stmt)
+            fn_compiler.compile_statement(stmt)
 
         # Implicit return nil at end of function
         fn_compiler.emit_return(node.line)
@@ -448,6 +449,8 @@ class BytecodeCompiler(ASTVisitor):
         if self.type == FunctionType.TYPE_INITIALIZER:
             if node.value is not None:
                 raise CompileError("Cannot return a value from an initializer", node.line)
+            for _ in range(self.try_depth):
+                self.emit_opcode(OpCode.OP_POP_HANDLER, node.line)
             self.emit_opcode(OpCode.OP_GET_LOCAL, node.line)
             self.emit_u16(0, node.line)
             self.emit_opcode(OpCode.OP_RETURN, node.line)
@@ -457,6 +460,9 @@ class BytecodeCompiler(ASTVisitor):
             self.visit(node.value)
         else:
             self.emit_opcode(OpCode.OP_NIL, node.line)
+
+        for _ in range(self.try_depth):
+            self.emit_opcode(OpCode.OP_POP_HANDLER, node.line)
 
         self.emit_opcode(OpCode.OP_RETURN, node.line)
 
@@ -490,7 +496,7 @@ class BytecodeCompiler(ASTVisitor):
                 method_compiler.mark_initialized()
 
             for stmt in method.body.statements:
-                method_compiler.visit(stmt)
+                method_compiler.compile_statement(stmt)
 
             if fn_type == FunctionType.TYPE_INITIALIZER:
                 method_compiler.emit_opcode(OpCode.OP_GET_LOCAL, method.line)
@@ -572,3 +578,33 @@ class BytecodeCompiler(ASTVisitor):
 
     def visit_DebuggerNode(self, node: DebuggerNode) -> None:
         self.emit_opcode(OpCode.OP_DEBUGGER, node.line)
+
+    def visit_TryCatchNode(self, node: TryCatchNode) -> None:
+        handler_jump = self.emit_jump(OpCode.OP_PUSH_HANDLER, node.line)
+
+        self.try_depth += 1
+        self.visit_BlockNode(node.try_block)
+        self.try_depth -= 1
+
+        self.emit_opcode(OpCode.OP_POP_HANDLER, node.line)
+        end_jump = self.emit_jump(OpCode.OP_JUMP, node.line)
+
+        self.patch_jump(handler_jump)
+
+        # Catch block: exception value is pushed onto the stack by the VM unwinder
+        self.begin_scope()
+        if node.catch_var:
+            self.add_local(node.catch_var, node.line)
+            self.mark_initialized()
+        else:
+            self.emit_opcode(OpCode.OP_POP, node.line)
+
+        for stmt in node.catch_block.statements:
+            self.compile_statement(stmt)
+        self.end_scope(node.line)
+
+        self.patch_jump(end_jump)
+
+    def visit_ThrowNode(self, node: ThrowNode) -> None:
+        self.visit(node.expression)
+        self.emit_opcode(OpCode.OP_THROW, node.line)

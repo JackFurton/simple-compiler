@@ -77,7 +77,7 @@ def disassemble_instruction(chunk: Chunk, offset: int) -> Tuple[str, int, Option
         slot = chunk.read_u16(offset + 1)
         return f"{offset:04d} {line_str} {opcode.name:<18} slot {slot}", offset + 3, None
 
-    elif opcode in (OpCode.OP_JUMP, OpCode.OP_JUMP_IF_FALSE):
+    elif opcode in (OpCode.OP_JUMP, OpCode.OP_JUMP_IF_FALSE, OpCode.OP_PUSH_HANDLER):
         jump_offset = chunk.read_u16(offset + 1)
         target = offset + 3 + jump_offset
         return f"{offset:04d} {line_str} {opcode.name:<18} -> {target:04d} (+{jump_offset})", offset + 3, None
