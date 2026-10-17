@@ -138,7 +138,8 @@ class ASTOptimizer:
             return None
 
         body = self.optimize(node.body)
-        return WhileNode(cond, body, line=node.line, column=node.column)
+        inc = self.optimize(node.increment) if node.increment else None
+        return WhileNode(cond, body, line=node.line, column=node.column, increment=inc)
 
     def opt_UnaryOpNode(self, node: UnaryOpNode) -> ASTNode:
         operand = self.optimize(node.operand)

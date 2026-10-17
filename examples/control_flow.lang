@@ -25,3 +25,18 @@ let outer = "outside";
     print "Inside block: " + inner + ", " + outer;
 }
 print "Outside block again: " + outer;
+
+// For-in iteration with break, continue, and +=
+let scores = [10, 20, 30, 40, 50];
+let filtered_sum = 0;
+for (s in scores) {
+    if (s == 20) {
+        continue;
+    }
+    if (s > 40) {
+        break;
+    }
+    filtered_sum += s;
+}
+print "Filtered sum: " + str(filtered_sum);
+

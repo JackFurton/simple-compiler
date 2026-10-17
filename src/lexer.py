@@ -21,6 +21,9 @@ class Lexer:
         'else': TokenType.ELSE,
         'while': TokenType.WHILE,
         'for': TokenType.FOR,
+        'in': TokenType.IN,
+        'break': TokenType.BREAK,
+        'continue': TokenType.CONTINUE,
         'fn': TokenType.FN,
         'return': TokenType.RETURN,
         'true': TokenType.TRUE,
@@ -217,12 +220,36 @@ class Lexer:
                     return self._make_token(TokenType.GREATER_EQUAL, '>=', start_line, start_col)
                 return self._make_token(TokenType.GREATER, '>', start_line, start_col)
 
+            if self.current_char == '+':
+                self._advance()
+                if self.current_char == '=':
+                    self._advance()
+                    return self._make_token(TokenType.PLUS_ASSIGN, '+=', start_line, start_col)
+                return self._make_token(TokenType.PLUS, '+', start_line, start_col)
+
+            if self.current_char == '-':
+                self._advance()
+                if self.current_char == '=':
+                    self._advance()
+                    return self._make_token(TokenType.MINUS_ASSIGN, '-=', start_line, start_col)
+                return self._make_token(TokenType.MINUS, '-', start_line, start_col)
+
+            if self.current_char == '*':
+                self._advance()
+                if self.current_char == '=':
+                    self._advance()
+                    return self._make_token(TokenType.STAR_ASSIGN, '*=', start_line, start_col)
+                return self._make_token(TokenType.MULTIPLY, '*', start_line, start_col)
+
+            if self.current_char == '/':
+                self._advance()
+                if self.current_char == '=':
+                    self._advance()
+                    return self._make_token(TokenType.SLASH_ASSIGN, '/=', start_line, start_col)
+                return self._make_token(TokenType.DIVIDE, '/', start_line, start_col)
+
             # Single-character tokens
             char_map = {
-                '+': TokenType.PLUS,
-                '-': TokenType.MINUS,
-                '*': TokenType.MULTIPLY,
-                '/': TokenType.DIVIDE,
                 '%': TokenType.MODULO,
                 ';': TokenType.SEMICOLON,
                 ',': TokenType.COMMA,
